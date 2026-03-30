@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Google Sans', Arial, sans-serif;
+      background: #f8f9fa;
+      margin: 0;
+      padding: 20px;
+      color: #202124;
+    }
+    h2 { color: #1a73e8; margin: 0 0 6px; font-size: 17px; }
+    p  { color: #5f6368; font-size: 13px; margin: 0 0 14px; }
+    .step {
+      font-size: 12px;
+      color: #5f6368;
+      padding: 6px 10px;
+      border-left: 3px solid #1a73e8;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+    .step strong { color: #202124; }
+    label { font-size: 13px; font-weight: 600; display: block; margin-top: 14px; }
+    input[type=file] {
+      display: block;
+      margin-top: 6px;
+      font-size: 13px;
+    }
+    select, input[type=text] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+    button {
+      padding: 9px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary  { background: #1a73e8; color: white; flex: 1; }
+    .btn-primary:hover  { background: #1558b0; }
+    .btn-secondary{ background: #f1f3f4; color: #3c4043; }
+    #preview {
+      margin-top: 14px;
+      font-size: 12px;
+      color: #5f6368;
+      max-height: 80px;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #e8eaed;
+      border-radius: 4px;
+      padding: 8px;
+      white-space: pre;
+      font-family: monospace;
+    }
+    #status { margin-top: 12px; font-size: 13px; min-height: 18px; }
+    .ok  { color: #1e8e3e; font-weight: 600; }
+    .err { color: #d93025; font-weight: 600; }
+  </style>
+</head>
+<body>
+
+  <h2>Import Net Liquidity from CSV</h2>
+  <p>Upload a CSV file with your historical account values. Supported formats below.</p>
+
+  <div class="step">
+    <strong>Schwab export:</strong> schwab.com → Accounts → Performance → Export CSV<br>
+    Expected columns: <em>Date, Account Value</em>
+  </div>
+  <div class="step">
+    <strong>Custom CSV:</strong> Any two-column file where column 1 = Date, column 2 = Value.<br>
+    Date formats accepted: YYYY-MM-DD, MM/DD/YYYY, M/D/YY
+  </div>
+
+  <label>CSV File
+    <input type="file" id="csvFile" accept=".csv,text/csv">
+  </label>
+
+  <label>Date Column Index (1-based)
+    <input type="text" id="dateCol" value="1" style="width:60px">
+  </label>
+
+  <label>Value Column Index (1-based)
+    <input type="text" id="valCol" value="2" style="width:60px">
+  </label>
+
+  <div id="preview" style="display:none"></div>
+
+  <div class="btn-row">
+    <button class="btn-primary" onclick="upload()">Import</button>
+    <button class="btn-secondary" onclick="google.script.host.close()">Cancel</button>
+  </div>
+  <div id="status"></div>
+
+<script>
+  function setStatus(msg, cls) {
+    const el = document.getElementById('status');
+    el.className = cls || '';
+    el.textContent = msg;
+  }
+
+  document.getElementById('csvFile').addEventListener('change', function () {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const lines = e.target.result.split('\n').slice(0, 5).join('\n');
+      const prev  = document.getElementById('preview');
+      prev.style.display = 'block';
+      prev.textContent   = lines;
+    };
+    reader.readAsText(file);
+  });
+
+  function upload() {
+    const file     = document.getElementById('csvFile').files[0];
+    const dateCol  = parseInt(document.getElementById('dateCol').value, 10) - 1;
+    const valCol   = parseInt(document.getElementById('valCol').value, 10) - 1;
+
+    if (!file) { setStatus('⚠️  Please select a CSV file.', 'err'); return; }
+
+    setStatus('Parsing file…');
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const lines = e.target.result.split('\n');
+      const rows  = [];
+
+      lines.forEach((line, idx) => {
+        // Skip header row if first cell looks like text
+        if (idx === 0 && isNaN(parseFloat(line.split(',')[valCol]))) return;
+
+        const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
+        if (cols.length < Math.max(dateCol, valCol) + 1) return;
+
+        const rawDate = cols[dateCol];
+        const rawVal  = cols[valCol].replace(/[$,\s]/g, '');
+        const value   = parseFloat(rawVal);
+
+        if (!rawDate || isNaN(value) || value <= 0) return;
+
+        // Normalize date to YYYY-MM-DD
+        let date;
+        if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+          date = rawDate.substring(0, 10);
+        } else {
+          const d = new Date(rawDate);
+          if (isNaN(d.getTime())) return;
+          date = d.toISOString().substring(0, 10);
+        }
+
+        rows.push({ date, value });
+      });
+
+      if (rows.length === 0) {
+        setStatus('❌  No valid rows found. Check column indices and date/value format.', 'err');
+        return;
+      }
+
+      setStatus(`Uploading ${rows.length} rows…`);
+      google.script.run
+        .withSuccessHandler(function (msg) {
+          setStatus('✅  ' + msg, 'ok');
+          setTimeout(function () { google.script.host.close(); }, 1500);
+        })
+        .withFailureHandler(function (err) {
+          setStatus('❌  ' + err.message, 'err');
+        })
+        .importNetLiqFromCsv(rows);
+    };
+    reader.readAsText(file);
+  }
+</script>
+</body>
+</html>

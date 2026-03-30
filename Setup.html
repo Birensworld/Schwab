@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Google Sans', Arial, sans-serif;
+      background: #f8f9fa;
+      margin: 0;
+      padding: 20px;
+      color: #202124;
+    }
+    h2 {
+      color: #1a73e8;
+      margin: 0 0 4px;
+      font-size: 18px;
+    }
+    .subtitle {
+      color: #5f6368;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .subtitle a { color: #1a73e8; }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #3c4043;
+      margin-top: 14px;
+    }
+    input {
+      width: 100%;
+      padding: 9px 12px;
+      margin-top: 5px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #1a73e8; }
+    .hint {
+      color: #80868b;
+      font-size: 11px;
+      margin-top: 3px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 22px;
+    }
+    button {
+      padding: 10px 22px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: #1a73e8;
+      color: white;
+      flex: 1;
+    }
+    .btn-primary:hover { background: #1558b0; }
+    .btn-secondary {
+      background: #f1f3f4;
+      color: #3c4043;
+    }
+    .btn-secondary:hover { background: #e8eaed; }
+    #status {
+      margin-top: 14px;
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .status-ok  { color: #1e8e3e; font-weight: 600; }
+    .status-err { color: #d93025; font-weight: 600; }
+    .status-info{ color: #5f6368; }
+    .divider {
+      border: none;
+      border-top: 1px solid #e8eaed;
+      margin: 18px 0 14px;
+    }
+    .step {
+      font-size: 12px;
+      color: #5f6368;
+      padding-left: 10px;
+      border-left: 3px solid #1a73e8;
+      margin-bottom: 8px;
+    }
+    .step strong { color: #202124; }
+  </style>
+</head>
+<body>
+
+  <h2>Schwab API Setup</h2>
+  <p class="subtitle">
+    Register your app at
+    <a href="https://developer.schwab.com" target="_blank">developer.schwab.com</a>
+    to obtain your credentials.
+  </p>
+
+  <div class="step"><strong>Step 1:</strong> Enter your Client ID &amp; Secret below and click Save.</div>
+  <div class="step"><strong>Step 2:</strong> Click "Authorize with Schwab" to complete OAuth login.</div>
+
+  <label>Client ID (App Key)
+    <input type="text" id="clientId" placeholder="e.g. abc123XYZ…" autocomplete="off">
+  </label>
+
+  <label>Client Secret
+    <input type="password" id="clientSecret" placeholder="Your app secret">
+  </label>
+
+  <label>Account Number
+    <input type="text" id="accountNumber" placeholder="e.g. 12345678  (optional)">
+    <div class="hint">Leave blank to use your first linked account.</div>
+  </label>
+
+  <div class="btn-row">
+    <button class="btn-primary" onclick="save()">Save &amp; Authorize</button>
+    <button class="btn-secondary" onclick="google.script.host.close()">Cancel</button>
+  </div>
+
+  <div id="status"></div>
+
+  <hr class="divider">
+
+  <div style="font-size:12px; color:#80868b;">
+    <strong>Callback URL</strong> — paste this into your Schwab app's redirect URI list:<br>
+    <code id="callbackUrl" style="word-break:break-all; color:#1a73e8;">
+      Loading…
+    </code>
+  </div>
+
+<script>
+  // Show the callback URL so the user can copy it into their Schwab app
+  window.onload = function () {
+    const url = window.location.href;
+    // Extract the script ID from the current page URL pattern
+    const match = url.match(/\/d\/([^/]+)\//);
+    if (match) {
+      document.getElementById('callbackUrl').textContent =
+        'https://script.google.com/macros/d/' + match[1] + '/usercallback';
+    } else {
+      document.getElementById('callbackUrl').textContent =
+        '(Open this dialog from a published Apps Script to see the URL)';
+    }
+  };
+
+  function setStatus(msg, cls) {
+    const el = document.getElementById('status');
+    el.className = cls;
+    el.textContent = msg;
+  }
+
+  function save() {
+    const clientId      = document.getElementById('clientId').value.trim();
+    const clientSecret  = document.getElementById('clientSecret').value.trim();
+    const accountNumber = document.getElementById('accountNumber').value.trim();
+
+    if (!clientId || !clientSecret) {
+      setStatus('⚠️  Client ID and Client Secret are required.', 'status-err');
+      return;
+    }
+
+    setStatus('Saving credentials…', 'status-info');
+
+    google.script.run
+      .withSuccessHandler(function (msg) {
+        setStatus('✅ ' + msg, 'status-ok');
+        // Small delay then launch the auth flow
+        setTimeout(function () {
+          google.script.run
+            .withSuccessHandler(function () {
+              google.script.host.close();
+            })
+            .withFailureHandler(function (err) {
+              setStatus('⚠️  Auth dialog error: ' + err.message, 'status-err');
+            })
+            .authorizeWithSchwab();
+        }, 800);
+      })
+      .withFailureHandler(function (err) {
+        setStatus('❌ ' + err.message, 'status-err');
+      })
+      .saveCredentials(clientId, clientSecret, accountNumber);
+  }
+</script>
+</body>
+</html>
