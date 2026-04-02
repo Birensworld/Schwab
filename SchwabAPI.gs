@@ -51,7 +51,7 @@ function fetchNetLiqForSuffix_(suffix) {
  * @returns {Array}
  */
 function getTransactions(encryptedAccountNumber, startDate, endDate) {
-  return apiGet_(
+  const result = apiGet_(
     `${TRADER_API_BASE}/accounts/${encryptedAccountNumber}/transactions`,
     {
       startDate,
@@ -59,6 +59,44 @@ function getTransactions(encryptedAccountNumber, startDate, endDate) {
       types: 'TRADE,RECEIVE_AND_DELIVER,DIVIDEND_OR_INTEREST,ELECTRONIC_FUND,OTHER',
     }
   );
+  // API returns a direct array; guard against unexpected wrapper objects
+  if (Array.isArray(result)) return result;
+  if (result && Array.isArray(result.transactions)) return result.transactions;
+  return [];
+}
+
+/**
+ * Debug helper — run from the Apps Script editor to test the transactions
+ * endpoint directly. Check View → Logs after running.
+ */
+function debugTransactions() {
+  const props = PropertiesService.getScriptProperties();
+  var hash = props.getProperty('SCHWAB_ACCT_HASH_418');
+  if (!hash) {
+    hash = getHashForSuffix_('418');
+  }
+
+  var start = new Date();
+  start.setDate(start.getDate() - 7);  // last 7 days
+
+  console.log('Account hash (truncated): ' + hash.substring(0, 8) + '…');
+  console.log('Querying transactions from ' + start.toISOString() + ' to now');
+
+  try {
+    var raw = apiGet_(
+      TRADER_API_BASE + '/accounts/' + hash + '/transactions',
+      {
+        startDate: start.toISOString(),
+        endDate:   new Date().toISOString(),
+        types:     'TRADE,RECEIVE_AND_DELIVER,DIVIDEND_OR_INTEREST,ELECTRONIC_FUND,OTHER',
+      }
+    );
+    console.log('Raw response type: ' + typeof raw);
+    console.log('Is array: ' + Array.isArray(raw));
+    console.log('Response (first 500 chars): ' + JSON.stringify(raw).substring(0, 500));
+  } catch (e) {
+    console.error('Transaction API error: ' + e.message);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────

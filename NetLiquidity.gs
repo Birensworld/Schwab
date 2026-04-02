@@ -110,9 +110,12 @@ function reconstructNetLiqHistoryForAccount(suffix) {
 
     if (allTx.length === 0) {
       throw new Error(
-        'No transactions returned by the API.\n\n' +
-        'Schwab may only provide 1–2 years of transaction history. ' +
-        'Try setting HISTORY_START in Code.gs to a more recent date.'
+        'No transactions found between ' + HISTORY_START + ' and today.\n\n' +
+        'This could mean:\n' +
+        '  • No trading activity in this period\n' +
+        '  • The transaction API call failed silently\n\n' +
+        'Run debugTransactions() from the Apps Script editor and check\n' +
+        'View → Logs to see the raw API response.'
       );
     }
 
@@ -275,9 +278,10 @@ function reconstructDailyValues_(currentCash, currentPositions, txByDate, priceM
 // ─────────────────────────────────────────────────────────────────
 
 function fetchAllTransactionsInChunks_(accountHash) {
-  const allTx = [];
-  const start = new Date(HISTORY_START);
-  const end   = new Date();
+  const allTx  = [];
+  const start  = new Date(HISTORY_START);
+  const end    = new Date();
+  const errors = [];
 
   for (var cur = new Date(start); cur < end; ) {
     var chunkEnd = new Date(cur);
@@ -286,13 +290,26 @@ function fetchAllTransactionsInChunks_(accountHash) {
 
     try {
       var txs = getTransactions(accountHash, cur.toISOString(), chunkEnd.toISOString());
-      if (Array.isArray(txs)) Array.prototype.push.apply(allTx, txs);
+      if (Array.isArray(txs)) {
+        Array.prototype.push.apply(allTx, txs);
+        console.log('Chunk ' + cur.toISOString().slice(0,10) + ' → ' +
+          chunkEnd.toISOString().slice(0,10) + ': ' + txs.length + ' transactions');
+      }
     } catch (e) {
-      console.warn('Skipping chunk ' + cur.toISOString() + ': ' + e.message);
+      var msg = 'Chunk ' + cur.toISOString().slice(0,10) + ': ' + e.message;
+      console.error(msg);
+      errors.push(msg);
     }
 
     cur = new Date(chunkEnd);
     cur.setDate(cur.getDate() + 1);
+  }
+
+  if (allTx.length === 0 && errors.length > 0) {
+    throw new Error(
+      'All transaction API requests failed. First error:\n' + errors[0] +
+      '\n\nCheck View → Logs in the Apps Script editor for full details.'
+    );
   }
 
   return allTx;
