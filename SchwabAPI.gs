@@ -51,12 +51,13 @@ function fetchNetLiqForSuffix_(suffix) {
  * @returns {Array}
  */
 function getTransactions(encryptedAccountNumber, startDate, endDate) {
+  // Note: 'types' param does not accept comma-separated values.
+  // Omitting it returns all transaction types, which we filter in NetLiquidity.gs.
   const result = apiGet_(
     `${TRADER_API_BASE}/accounts/${encryptedAccountNumber}/transactions`,
     {
       startDate,
       endDate,
-      types: 'TRADE,RECEIVE_AND_DELIVER,DIVIDEND_OR_INTEREST,ELECTRONIC_FUND,OTHER',
     }
   );
   // API returns a direct array; guard against unexpected wrapper objects
