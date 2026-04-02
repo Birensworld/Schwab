@@ -145,7 +145,7 @@ function extractNetLiquidityFromAccount_(accountData) {
  * @returns {Object} Parsed JSON response
  */
 function apiGet_(url, params) {
-  const token = getAccessToken_();
+  const token = getAccessToken();
 
   let fullUrl = url;
   if (params && Object.keys(params).length > 0) {
