@@ -18,7 +18,7 @@ const ACCOUNT_CONFIGS = {
 
 // Shared constants
 const SHEET_SPY     = 'SPY History';
-const HISTORY_START = '2024-05-14';
+const HISTORY_START = '2026-01-01';
 
 /** Returns the sheet tab names for a given account suffix. */
 function sheetNames_(suffix) {
