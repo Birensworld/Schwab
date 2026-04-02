@@ -1,40 +1,38 @@
 /**
- * NetLiquidity.gs — Per-account Net Liquidity data management.
+ * NetLiquidity.gs — Manages the shared "Net Liquidity" sheet.
  *
- * Each account gets its own sheet tab: "Net Liq 418", "Net Liq 973", etc.
- * Sheet layout: Date | Net Liquidity ($) | Source
+ * Sheet layout:
+ *   Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
  *
- * Reconstruction approach (accurate):
- *   1. Fetches all transactions from HISTORY_START to today
- *   2. Walks backwards from today, reversing each trade to reconstruct
- *      historical position quantities at every date
- *   3. Fetches historical daily prices for every symbol ever held
- *   4. Daily Net Liq = reconstructed cash + Σ(qty × historical_close)
+ * Column positions are determined by ACCOUNT_ORDER in Code.gs.
+ * All accounts share one sheet; each has its own column.
  *
- * Limitations:
- *   - Options positions are treated as pure cash flows (no qty tracking)
- *   - Stock splits / mergers may cause inaccuracies for affected symbols
- *   - Schwab transactions API may not return data before ~2 years ago;
- *     the earliest available date is shown in the log after running
+ * Daily trigger writes only if no value exists yet for that date
+ * (preserves manually entered values).
  */
 
 // ─────────────────────────────────────────────────────────────────
 // Sheet bootstrap
 // ─────────────────────────────────────────────────────────────────
 
-function getOrCreateNetLiqSheet_(suffix) {
-  const ss        = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetName = sheetNames_(suffix).netLiq;
-  let sheet       = ss.getSheetByName(sheetName);
+function getOrCreateNetLiqSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_NET_LIQ);
   if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-    const hdr = sheet.getRange(1, 1, 1, 3);
-    hdr.setValues([['Date', 'Net Liquidity ($)', 'Source']]);
-    hdr.setFontWeight('bold').setBackground('#0b5394').setFontColor('#ffffff');
+    sheet = ss.insertSheet(SHEET_NET_LIQ);
+
+    // Build header row: Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
+    var headers = ['Date'];
+    ACCOUNT_ORDER.forEach(function(s) { headers.push('Net Liq ' + s + ' ($)'); });
+    headers.push('Source');
+
+    var hdrRange = sheet.getRange(1, 1, 1, headers.length);
+    hdrRange.setValues([headers]);
+    hdrRange.setFontWeight('bold').setBackground('#0b5394').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 120);
-    sheet.setColumnWidth(2, 160);
-    sheet.setColumnWidth(3, 110);
+    ACCOUNT_ORDER.forEach(function(_, i) { sheet.setColumnWidth(i + 2, 180); });
+    sheet.setColumnWidth(ACCOUNT_ORDER.length + 2, 110); // Source col
   }
   return sheet;
 }
@@ -43,13 +41,18 @@ function getOrCreateNetLiqSheet_(suffix) {
 // Public: capture today's value
 // ─────────────────────────────────────────────────────────────────
 
-function fetchTodayNetLiqForAccount(suffix) {
+/**
+ * Fetches live Net Liquidity from Schwab for one account and logs it.
+ * @param {string}  suffix        e.g. '418'
+ * @param {boolean} skipIfExists  If true, don't overwrite an existing value for today
+ */
+function fetchTodayNetLiqForAccount(suffix, skipIfExists) {
   try {
-    const value   = fetchNetLiqForSuffix_(suffix);
-    const dateStr = todayStr_();
-    upsertNetLiqRow_(suffix, dateStr, value, 'API');
+    var value   = fetchNetLiqForSuffix_(suffix);
+    var dateStr = todayStr_();
+    upsertNetLiqRow_(suffix, dateStr, value, 'API', skipIfExists);
     SpreadsheetApp.getActiveSpreadsheet().toast(
-      'Account …' + suffix + '  Net Liquidity: $' +
+      'Account …' + suffix + '  Net Liq: $' +
         value.toLocaleString('en-US', { minimumFractionDigits: 2 }),
       '✅ Captured', 5
     );
@@ -61,129 +64,43 @@ function fetchTodayNetLiqForAccount(suffix) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Public: accurate transaction-based reconstruction
+// Public: CSV import
 // ─────────────────────────────────────────────────────────────────
 
-function reconstructNetLiqHistoryForAccount(suffix) {
-  const ui   = SpreadsheetApp.getUi();
-  const resp = ui.alert(
-    'Reconstruct Net Liquidity — Account …' + suffix,
-    'This will:\n' +
-    '  1. Download all transactions from ' + HISTORY_START + ' to today\n' +
-    '  2. Reconstruct historical position quantities by replaying trades\n' +
-    '  3. Fetch historical daily prices for every symbol ever held\n' +
-    '  4. Calculate daily Net Liq = cash + Σ(qty × price)\n\n' +
-    'This takes 2–5 minutes depending on how many symbols you have traded.\n\n' +
-    'Continue?',
-    ui.ButtonSet.YES_NO
-  );
-  if (resp !== ui.Button.YES) return;
+function showCsvImportDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('CsvImport')
+    .setWidth(480).setHeight(360);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Import Net Liquidity from CSV');
+}
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  try {
-    // ── Step 1: current account state ─────────────────────────────
-    ss.toast('Fetching current account state…', 'Working', -1);
-    const hash          = getHashForSuffix_(suffix);
-    const accountData   = getAccountDetails(hash);
-    const sec           = accountData.securitiesAccount || accountData;
-    const bal           = sec.currentBalances || {};
-    const currentCash   = bal.cashBalance || 0;
-
-    // Current equity positions: { symbol → longQuantity }
-    const currentPositions = {};
-    if (sec.positions) {
-      sec.positions.forEach(function(pos) {
-        const sym = pos.instrument && pos.instrument.symbol;
-        const qty = pos.longQuantity || 0;
-        if (sym && qty > 0 && pos.instrument.assetType === 'EQUITY') {
-          currentPositions[sym] = qty;
-        }
-      });
-    }
-    console.log('Current cash: ' + currentCash);
-    console.log('Current equity positions: ' + JSON.stringify(currentPositions));
-
-    // ── Step 2: fetch all transactions ────────────────────────────
-    ss.toast('Downloading transaction history…', 'Working', -1);
-    const allTx = fetchAllTransactionsInChunks_(hash);
-    console.log('Total transactions fetched: ' + allTx.length);
-
-    if (allTx.length === 0) {
-      throw new Error(
-        'No transactions found between ' + HISTORY_START + ' and today.\n\n' +
-        'This could mean:\n' +
-        '  • No trading activity in this period\n' +
-        '  • The transaction API call failed silently\n\n' +
-        'Run debugTransactions() from the Apps Script editor and check\n' +
-        'View → Logs to see the raw API response.'
-      );
-    }
-
-    // ── Step 3: collect all equity symbols ever traded ────────────
-    const tradedSymbols = new Set(Object.keys(currentPositions));
-    allTx.forEach(function(tx) {
-      var item = tx.transactionItem;
-      if (!item || !item.instrument) return;
-      if (item.instrument.assetType !== 'EQUITY') return;
-      if (item.instrument.symbol) tradedSymbols.add(item.instrument.symbol);
-    });
-    console.log('Symbols to price: ' + JSON.stringify(Array.from(tradedSymbols)));
-
-    // ── Step 4: fetch price history for every symbol ──────────────
-    ss.toast('Fetching price history for ' + tradedSymbols.size + ' symbol(s)…', 'Working', -1);
-    const priceMap = fetchPriceHistoriesForSymbols_(tradedSymbols);
-
-    // ── Step 5: group transactions by date ────────────────────────
-    const txByDate = groupTransactionsByDate_(allTx);
-
-    // ── Step 6: reconstruct daily values backwards ────────────────
-    ss.toast('Reconstructing daily portfolio values…', 'Working', -1);
-    const dailyValues = reconstructDailyValues_(
-      currentCash, currentPositions, txByDate, priceMap
-    );
-
-    const count = Object.keys(dailyValues).length;
-    if (count === 0) {
-      throw new Error('Reconstruction produced no data. Check the Apps Script logs for details.');
-    }
-
-    writeNetLiqData_(suffix, dailyValues, 'Reconstructed');
-
-    const dates = Object.keys(dailyValues).sort();
-    ss.toast(
-      'Reconstructed ' + count + ' days  (' + dates[0] + ' → ' + dates[dates.length - 1] + ')',
-      '✅ Account …' + suffix + ' Complete', 15
-    );
-    console.log('Reconstruction complete. Days: ' + count +
-      '  Range: ' + dates[0] + ' → ' + dates[dates.length - 1]);
-
-  } catch (e) {
-    ui.alert('Reconstruction Error – Account ' + suffix, e.message, ui.ButtonSet.OK);
-    console.error(e);
-  }
+function importNetLiqFromCsv(rows, suffix) {
+  suffix = suffix || '418';
+  if (!rows || rows.length === 0) throw new Error('No data received.');
+  var tz = Session.getScriptTimeZone();
+  rows.forEach(function(row) {
+    var d = new Date(row.date);
+    if (isNaN(d.getTime())) return;
+    upsertNetLiqRow_(suffix, fmtDate_(d, tz), row.value, 'CSV Import', false);
+  });
+  return 'Imported ' + rows.length + ' rows into account …' + suffix + '.';
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Public: diagnostics
+// Diagnostics
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Run this from the Apps Script editor (not the menu) to diagnose
- * reconstruction accuracy. Check View → Logs after running.
- * It shows:
- *   - Starting cash + positions
- *   - First 3 raw transactions (so we can verify field names)
- *   - Reconstructed value for today vs actual API Net Liq
+ * Run from the Apps Script editor to validate reconstruction accuracy.
+ * Check View → Logs after running.
  */
 function debugReconstruction() {
   var suffix = '418';
   var hash   = getHashForSuffix_(suffix);
 
-  // Current state
-  var accountData = getAccountDetails(hash);
-  var sec  = accountData.securitiesAccount || accountData;
-  var bal  = sec.currentBalances || {};
-  var cash = bal.cashBalance || 0;
+  var accountData  = getAccountDetails(hash);
+  var sec          = accountData.securitiesAccount || accountData;
+  var bal          = sec.currentBalances || {};
+  var cash         = bal.cashBalance || 0;
   var actualNetLiq = extractNetLiquidityFromAccount_(accountData);
 
   var positions = {};
@@ -200,7 +117,6 @@ function debugReconstruction() {
   console.log('Actual Net Liq (API): ' + actualNetLiq);
   console.log('Positions: ' + JSON.stringify(positions));
 
-  // Sample transactions
   var end   = new Date();
   var start = new Date();
   start.setDate(start.getDate() - 30);
@@ -208,295 +124,88 @@ function debugReconstruction() {
 
   console.log('\n=== Last 30 days: ' + txs.length + ' transactions ===');
   txs.slice(0, 5).forEach(function(tx, i) {
-    console.log('\nTransaction ' + (i+1) + ':');
-    console.log('  type: '       + tx.type);
-    console.log('  tradeDate: '  + tx.tradeDate);
-    console.log('  netAmount: '  + tx.netAmount);
+    console.log('\nTransaction ' + (i + 1) + ':');
+    console.log('  type: '        + tx.type);
+    console.log('  tradeDate: '   + tx.tradeDate);
+    console.log('  netAmount: '   + tx.netAmount);
     var item = tx.transactionItem;
     if (item) {
-      console.log('  instruction: '  + item.instruction);
+      console.log('  instruction: '   + item.instruction);
       console.log('  positionEffect: '+ item.positionEffect);
-      console.log('  quantity: '     + item.quantity);
-      console.log('  price: '        + item.price);
+      console.log('  quantity: '      + item.quantity);
       var inst = item.instrument;
       if (inst) {
-        console.log('  symbol: '   + inst.symbol);
-        console.log('  assetType: '+ inst.assetType);
+        console.log('  symbol: '    + inst.symbol);
+        console.log('  assetType: ' + inst.assetType);
       }
     }
   });
-
-  // Validate today's reconstructed value
-  var allTx   = fetchAllTransactionsInChunks_(hash);
-  var symbols = new Set(Object.keys(positions));
-  allTx.forEach(function(tx) {
-    var item = tx.transactionItem;
-    if (item && item.instrument && item.instrument.assetType === 'EQUITY' && item.instrument.symbol) {
-      symbols.add(item.instrument.symbol);
-    }
-  });
-  var priceMap  = fetchPriceHistoriesForSymbols_(symbols);
-  var txByDate  = groupTransactionsByDate_(allTx);
-  var dailyVals = reconstructDailyValues_(cash, positions, txByDate, priceMap);
-
-  var todayStr  = fmtDate_(new Date());
-  var recon     = dailyVals[todayStr] || 'N/A';
-
-  console.log('\n=== Validation ===');
-  console.log('Reconstructed today (' + todayStr + '): ' + recon);
-  console.log('Actual Net Liq (API):                  ' + actualNetLiq);
-  if (typeof recon === 'number') {
-    var diff = Math.abs(recon - actualNetLiq);
-    var pct  = (diff / actualNetLiq * 100).toFixed(2);
-    console.log('Difference: $' + diff.toFixed(2) + ' (' + pct + '%)');
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Public: CSV import
-// ─────────────────────────────────────────────────────────────────
-
-function showCsvImportDialog() {
-  const html = HtmlService.createHtmlOutputFromFile('CsvImport')
-    .setWidth(480).setHeight(360);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Import Net Liquidity from CSV');
-}
-
-function importNetLiqFromCsv(rows, suffix) {
-  suffix = suffix || '418';
-  if (!rows || rows.length === 0) throw new Error('No data received.');
-  const sheet = getOrCreateNetLiqSheet_(suffix);
-  const tz    = Session.getScriptTimeZone();
-  const existing = {};
-  sheet.getDataRange().getValues().slice(1).forEach(function(r, i) {
-    if (r[0]) existing[fmtDate_(new Date(r[0]), tz)] = i + 2;
-  });
-  rows.forEach(function(row) {
-    const d = new Date(row.date);
-    if (isNaN(d.getTime())) return;
-    const ds = fmtDate_(d, tz);
-    if (existing[ds]) {
-      sheet.getRange(existing[ds], 2, 1, 2).setValues([[row.value, 'CSV Import']]);
-    } else {
-      sheet.appendRow([d, row.value, 'CSV Import']);
-    }
-  });
-  sortNetLiqSheet_(sheet);
-  return 'Imported ' + rows.length + ' rows into account …' + suffix + '.';
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Core reconstruction engine
+// Sheet read / write helpers
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Walks backwards day by day from today, reversing each trade to get
- * historical position quantities and cash balance, then values each day.
- *
- * @param {number}  currentCash        Today's cash balance from API
- * @param {Object}  currentPositions   { symbol: qty } from API
- * @param {Object}  txByDate           { 'YYYY-MM-DD': [tx, …] }
- * @param {Object}  priceMap           { symbol: { 'YYYY-MM-DD': closePrice } }
- * @returns {Object}  { 'YYYY-MM-DD': portfolioValue }
+ * Writes or updates a single date row for one account column.
+ * @param {string}  suffix        Account suffix, e.g. '418'
+ * @param {string}  dateStr       'YYYY-MM-DD'
+ * @param {number}  value         Net Liquidity value
+ * @param {string}  source        'API', 'Manual', 'CSV Import', etc.
+ * @param {boolean} skipIfExists  If true and a non-empty value already exists, do nothing
  */
-function reconstructDailyValues_(currentCash, currentPositions, txByDate, priceMap) {
-  const tz        = Session.getScriptTimeZone();
-  const result    = {};
-  const startDt   = new Date(HISTORY_START);
-  const positions = copyObj_(currentPositions);
-  var   cash      = currentCash;
+function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
+  var sheet  = getOrCreateNetLiqSheet_();
+  var tz     = Session.getScriptTimeZone();
+  var col    = netLiqCol_(suffix);                   // column for this account
+  var srcCol = ACCOUNT_ORDER.length + 2;             // Source is last column
+  var data   = sheet.getDataRange().getValues();
 
-  for (var d = new Date(); d >= startDt; d.setDate(d.getDate() - 1)) {
-    var ds      = fmtDate_(d, tz);
-    var dayTxs  = txByDate[ds] || [];
-
-    // Reverse every transaction that happened on this day
-    dayTxs.forEach(function(tx) {
-      // Reverse the cash effect for ALL transaction types
-      cash -= (tx.netAmount || 0);
-
-      // For equity trades, reverse the position quantity change
-      if (tx.type === 'TRADE' || tx.type === 'RECEIVE_AND_DELIVER') {
-        var item = tx.transactionItem;
-        if (!item || !item.instrument) return;
-        if (item.instrument.assetType !== 'EQUITY') return;
-
-        var sym = item.instrument.symbol;
-        var qty = item.quantity || 0;
-
-        if (item.instruction === 'BUY' || item.positionEffect === 'OPENING') {
-          // Going forward we bought; reverse = remove those shares
-          positions[sym] = (positions[sym] || 0) - qty;
-        } else if (item.instruction === 'SELL' || item.positionEffect === 'CLOSING') {
-          // Going forward we sold; reverse = add those shares back
-          positions[sym] = (positions[sym] || 0) + qty;
-        }
-      }
-    });
-
-    // Value positions using historical close prices
-    var positionValue = 0;
-    Object.keys(positions).forEach(function(sym) {
-      var qty = positions[sym];
-      if (qty <= 0) return;
-      var symPrices = priceMap[sym];
-      if (!symPrices) return;
-
-      // Use exact date price, or walk back up to 5 days for holidays/weekends
-      var price = symPrices[ds];
-      if (!price) {
-        for (var back = 1; back <= 5; back++) {
-          var prev = new Date(d);
-          prev.setDate(prev.getDate() - back);
-          price = symPrices[fmtDate_(prev, tz)];
-          if (price) break;
-        }
-      }
-      if (price) positionValue += qty * price;
-    });
-
-    var totalValue = cash + positionValue;
-    if (totalValue > 0) result[ds] = Math.round(totalValue * 100) / 100;
-  }
-
-  return result;
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Data fetch helpers
-// ─────────────────────────────────────────────────────────────────
-
-function fetchAllTransactionsInChunks_(accountHash) {
-  const allTx  = [];
-  const start  = new Date(HISTORY_START);
-  const end    = new Date();
-  const errors = [];
-
-  for (var cur = new Date(start); cur < end; ) {
-    var chunkEnd = new Date(cur);
-    chunkEnd.setMonth(chunkEnd.getMonth() + 3);
-    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
-
-    try {
-      var txs = getTransactions(accountHash, cur.toISOString(), chunkEnd.toISOString());
-      if (Array.isArray(txs)) {
-        Array.prototype.push.apply(allTx, txs);
-        console.log('Chunk ' + cur.toISOString().slice(0,10) + ' → ' +
-          chunkEnd.toISOString().slice(0,10) + ': ' + txs.length + ' transactions');
-      }
-    } catch (e) {
-      var msg = 'Chunk ' + cur.toISOString().slice(0,10) + ': ' + e.message;
-      console.error(msg);
-      errors.push(msg);
-    }
-
-    cur = new Date(chunkEnd);
-    cur.setDate(cur.getDate() + 1);
-  }
-
-  if (allTx.length === 0 && errors.length > 0) {
-    throw new Error(
-      'All transaction API requests failed. First error:\n' + errors[0] +
-      '\n\nCheck View → Logs in the Apps Script editor for full details.'
-    );
-  }
-
-  return allTx;
-}
-
-/**
- * Fetches daily close prices for a set of symbols from HISTORY_START to today.
- * Returns { symbol: { 'YYYY-MM-DD': closePrice } }.
- * Symbols that fail (delisted, etc.) are logged and skipped.
- */
-function fetchPriceHistoriesForSymbols_(symbolSet) {
-  const result  = {};
-  const tz      = Session.getScriptTimeZone();
-  const today   = new Date().toISOString().slice(0, 10);
-  const symbols = Array.from(symbolSet);
-
-  symbols.forEach(function(sym) {
-    try {
-      var resp = getPriceHistory(sym, HISTORY_START, today);
-      if (!resp.candles || resp.candles.length === 0) {
-        console.warn('No price history returned for ' + sym);
-        return;
-      }
-      result[sym] = {};
-      resp.candles.forEach(function(c) {
-        var ds = fmtDate_(new Date(c.datetime), tz);
-        result[sym][ds] = c.close;
-      });
-      console.log(sym + ': ' + resp.candles.length + ' price points');
-    } catch (e) {
-      console.warn('Could not fetch prices for ' + sym + ': ' + e.message);
-    }
-  });
-
-  return result;
-}
-
-function groupTransactionsByDate_(transactions) {
-  const byDate = {};
-  transactions.forEach(function(tx) {
-    if (!tx.tradeDate) return;
-    var ds = tx.tradeDate.substring(0, 10);
-    if (!byDate[ds]) byDate[ds] = [];
-    byDate[ds].push(tx);
-  });
-  return byDate;
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Sheet write / read helpers
-// ─────────────────────────────────────────────────────────────────
-
-function writeNetLiqData_(suffix, dailyValues, source) {
-  const sheet   = getOrCreateNetLiqSheet_(suffix);
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-
-  const rows = Object.entries(dailyValues)
-    .filter(function(e) { return e[1] > 0; })
-    .sort(function(a, b) { return a[0].localeCompare(b[0]); })
-    .map(function(e) { return [new Date(e[0]), e[1], source]; });
-
-  if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, 3).setValues(rows);
-    sheet.getRange(2, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
-    sheet.getRange(2, 2, rows.length, 1).setNumberFormat('"$"#,##0.00');
-  }
-}
-
-function upsertNetLiqRow_(suffix, dateStr, value, source) {
-  const sheet = getOrCreateNetLiqSheet_(suffix);
-  const tz    = Session.getScriptTimeZone();
-  const data  = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (!data[i][0]) continue;
-    if (fmtDate_(new Date(data[i][0]), tz) === dateStr) {
-      sheet.getRange(i + 1, 2, 1, 2).setValues([[value, source]]);
-      return;
-    }
+    if (fmtDate_(new Date(data[i][0]), tz) !== dateStr) continue;
+
+    // Row found for this date
+    var existing = data[i][col - 1];
+    if (skipIfExists && existing !== '' && existing !== 0 && existing !== null) return;
+    sheet.getRange(i + 1, col).setValue(value);
+    sheet.getRange(i + 1, srcCol).setValue(source);
+    return;
   }
-  sheet.appendRow([new Date(dateStr), value, source]);
+
+  // No row for this date — append a new one
+  var newRow = [new Date(dateStr)];
+  ACCOUNT_ORDER.forEach(function(s) {
+    newRow.push(s === suffix ? value : '');
+  });
+  newRow.push(source);
+  sheet.appendRow(newRow);
   sortNetLiqSheet_(sheet);
 }
 
 function sortNetLiqSheet_(sheet) {
   var last = sheet.getLastRow();
-  if (last > 2) sheet.getRange(2, 1, last - 1, 3).sort(1);
+  if (last > 2) sheet.getRange(2, 1, last - 1, ACCOUNT_ORDER.length + 2).sort(1);
 }
 
+/**
+ * Returns a date-keyed map of Net Liquidity values for one account.
+ * Used by the chart builder.
+ * @param {string} suffix  e.g. '418'
+ * @returns {Object}  { 'YYYY-MM-DD': number }
+ */
 function getNetLiqMap_(suffix) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(sheetNames_(suffix).netLiq);
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_NET_LIQ);
   if (!sheet) return {};
-  const tz  = Session.getScriptTimeZone();
-  const map = {};
+
+  var tz  = Session.getScriptTimeZone();
+  var col = netLiqCol_(suffix) - 1;  // 0-based for array indexing
+  var map = {};
+
   sheet.getDataRange().getValues().slice(1).forEach(function(row) {
-    if (!row[0] || !row[1]) return;
-    var v = parseFloat(row[1]);
+    if (!row[0]) return;
+    var v = parseFloat(row[col]);
     if (isNaN(v) || v <= 0) return;
     map[fmtDate_(new Date(row[0]), tz)] = v;
   });
@@ -511,12 +220,4 @@ function fmtDate_(date, tz) {
   return Utilities.formatDate(date, tz || Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
-function todayStr_() {
-  return fmtDate_(new Date());
-}
-
-function copyObj_(obj) {
-  var copy = {};
-  Object.keys(obj).forEach(function(k) { copy[k] = obj[k]; });
-  return copy;
-}
+function todayStr_() { return fmtDate_(new Date()); }

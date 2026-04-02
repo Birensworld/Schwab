@@ -1,31 +1,34 @@
 /**
  * Schwab Equity Curve — Google Apps Script
  *
- * Plots Portfolio Net Liquidity vs SPY, indexed to 100 at the first
- * common trading day, for one or more Schwab accounts.
- *
- * Each account gets its own "Net Liq ###" and "Equity Curve ###" tabs.
- * SPY History is shared across all accounts.
+ * Sheet layout:
+ *   "Net Liquidity"  — Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
+ *   "SPY History"    — Date | SPY Close | SPY Indexed | QQQ Close | QQQ Indexed
+ *   "Equity Curve 418" / "Equity Curve 973" — per-account charts vs SPY + QQQ
  *
  * ─── Account registry ────────────────────────────────────────────
- * Add accounts here as { 'last3digits': 'fullAccountNumber' }.
- * Account 418 is active; 973 is defined but not yet in the menu.
+ * Keys are the last-3-digit suffix used throughout; values are full account numbers.
+ * ACCOUNT_ORDER determines column order in the Net Liquidity sheet.
  */
 const ACCOUNT_CONFIGS = {
   '418': '52172418',
   '973': '55262973',
 };
+const ACCOUNT_ORDER = ['418', '973'];   // col 2 = 418, col 3 = 973
 
-// Shared constants
-const SHEET_SPY     = 'SPY History';
-const HISTORY_START = '2026-01-01';
+// Sheet name constants
+const SHEET_NET_LIQ  = 'Net Liquidity'; // single shared sheet, one col per account
+const SHEET_SPY      = 'SPY History';
+const HISTORY_START  = '2026-01-01';
 
-/** Returns the sheet tab names for a given account suffix. */
-function sheetNames_(suffix) {
-  return {
-    netLiq: 'Net Liq ' + suffix,
-    chart:  'Equity Curve ' + suffix,
-  };
+/** Returns the column index (1-based) for a given account suffix in the Net Liq sheet. */
+function netLiqCol_(suffix) {
+  return ACCOUNT_ORDER.indexOf(suffix) + 2;  // col 1 = Date, col 2+ = accounts
+}
+
+/** Returns the Equity Curve chart sheet name for an account. */
+function chartSheetName_(suffix) {
+  return 'Equity Curve ' + suffix;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -43,48 +46,50 @@ function onOpen() {
     .addToUi();
 
   ui.createMenu('📈 Equity Curve')
-    // ── SPY (shared) ──────────────────────────────────────────────
-    .addItem('📊 Fetch SPY History (2020 → Today)', 'fetchSPYHistory')
+    .addItem('📊 Fetch SPY + QQQ History',              'fetchSPYHistory')
     .addSeparator()
-    // ── Account 418 ───────────────────────────────────────────────
     .addSubMenu(ui.createMenu('💼 Account …418')
-      .addItem("Capture Today's Net Liquidity",            'fetchTodayNetLiq_418')
-      .addItem('Reconstruct History from Transactions ⚠️', 'reconstructNetLiqHistory_418')
-      .addItem('Import Net Liq from CSV…',                 'showCsvImportDialog')
+      .addItem("Capture Today's Net Liquidity",          'fetchTodayNetLiq_418')
+      .addItem('Import Net Liq from CSV…',               'showCsvImportDialog')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',       'buildEquityCurveChart_418'))
+      .addItem('Build / Refresh Equity Curve Chart',     'buildEquityCurveChart_418'))
+    .addSubMenu(ui.createMenu('💼 Account …973')
+      .addItem("Capture Today's Net Liquidity",          'fetchTodayNetLiq_973')
+      .addItem('Import Net Liq from CSV…',               'showCsvImportDialog')
+      .addSeparator()
+      .addItem('Build / Refresh Equity Curve Chart',     'buildEquityCurveChart_973'))
     .addSeparator()
-    // ── Automation ────────────────────────────────────────────────
     .addSubMenu(ui.createMenu('⏰ Automation')
       .addItem('Enable Daily Snapshot – All Accounts (4:30 PM ET)', 'setupDailyTrigger')
       .addItem('Disable Daily Snapshot',                            'removeDailyTrigger'))
     .addToUi();
 }
 
-// ─── Account 418 menu handlers ───────────────────────────────────
-function fetchTodayNetLiq_418()         { fetchTodayNetLiqForAccount('418'); }
-function reconstructNetLiqHistory_418() { reconstructNetLiqHistoryForAccount('418'); }
-function buildEquityCurveChart_418()    { buildEquityCurveChartForAccount('418'); }
+// ─── Per-account menu wrappers ────────────────────────────────────
+function fetchTodayNetLiq_418()      { fetchTodayNetLiqForAccount('418'); }
+function fetchTodayNetLiq_973()      { fetchTodayNetLiqForAccount('973'); }
+function buildEquityCurveChart_418() { buildEquityCurveChartForAccount('418'); }
+function buildEquityCurveChart_973() { buildEquityCurveChartForAccount('973'); }
 
 /**
- * Daily trigger target — captures Net Liq for every configured account.
- * Also callable manually from the Apps Script editor.
+ * Daily trigger target — captures Net Liq for every account,
+ * skipping any date that already has a value (preserves manual entries).
  */
 function fetchTodayNetLiq() {
-  Object.keys(ACCOUNT_CONFIGS).forEach(function(suffix) {
+  ACCOUNT_ORDER.forEach(function(suffix) {
     try {
-      fetchTodayNetLiqForAccount(suffix);
+      fetchTodayNetLiqForAccount(suffix, true); // true = skip if already exists
     } catch (e) {
       console.error('Daily snapshot failed for account ' + suffix + ': ' + e.message);
     }
   });
 }
 
-/** Refresh SPY + all accounts + rebuild all charts. */
+/** Refresh benchmarks + all account snapshots + rebuild all charts. */
 function refreshAllData() {
   fetchSPYHistory();
-  Object.keys(ACCOUNT_CONFIGS).forEach(function(suffix) {
-    fetchTodayNetLiqForAccount(suffix);
+  ACCOUNT_ORDER.forEach(function(suffix) {
+    fetchTodayNetLiqForAccount(suffix, true);
     buildEquityCurveChartForAccount(suffix);
   });
 }

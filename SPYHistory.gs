@@ -1,12 +1,10 @@
 /**
- * SPYHistory.gs — Fetches and stores daily SPY closing prices via the
- * Schwab Market Data (price history) API.
+ * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
  *
- * Sheet layout: Date | Close ($) | Indexed (Base = 100)
+ * Sheet layout (SHEET_SPY):
+ *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
  *
- * The "Indexed" column is normalized so that the earliest date = 100,
- * making it directly comparable to the indexed Portfolio series in the
- * Equity Curve chart.
+ * Both series are indexed to 100 at the first date with data for both symbols.
  */
 
 // ─────────────────────────────────────────────────────────────────
@@ -18,13 +16,16 @@ function getOrCreateSPYSheet_() {
   let sheet = ss.getSheetByName(SHEET_SPY);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_SPY);
-    const hdr = sheet.getRange(1, 1, 1, 3);
-    hdr.setValues([['Date', 'Close ($)', 'Indexed (Base = 100)']]);
+    const hdr = sheet.getRange(1, 1, 1, 5);
+    hdr.setValues([[
+      'Date',
+      'SPY Close ($)', 'SPY Indexed (Base=100)',
+      'QQQ Close ($)', 'QQQ Indexed (Base=100)',
+    ]]);
     hdr.setFontWeight('bold').setBackground('#cc0000').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 120);
-    sheet.setColumnWidth(2, 120);
-    sheet.setColumnWidth(3, 160);
+    [2, 3, 4, 5].forEach(function(c) { sheet.setColumnWidth(c, 160); });
   }
   return sheet;
 }
@@ -34,65 +35,65 @@ function getOrCreateSPYSheet_() {
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Fetches all SPY daily closes from HISTORY_START to today using the
- * Schwab Market Data API and writes them to the SPY History sheet.
- *
- * The Schwab API caps a single pricehistory request at ~1825 days
- * (5 years), so we split into ≤5-year chunks when the range exceeds that.
+ * Fetches daily closes for SPY and QQQ from HISTORY_START to today
+ * and writes them to the SPY History sheet.
  */
 function fetchSPYHistory() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
-    ss.toast('Fetching SPY price history from Schwab…', 'Working', -1);
+    ss.toast('Fetching SPY and QQQ price history…', 'Working', -1);
 
-    const startDate = new Date(HISTORY_START);
-    const endDate   = new Date();
+    const today   = new Date().toISOString().slice(0, 10);
+    const spyData = fetchCandlesForSymbol_('SPY', HISTORY_START, today);
+    const qqqData = fetchCandlesForSymbol_('QQQ', HISTORY_START, today);
 
-    // Fetch in ≤5-year chunks
-    const allCandles = [];
-    for (let cur = new Date(startDate); cur < endDate; ) {
-      const chunkEnd = new Date(cur);
-      chunkEnd.setFullYear(chunkEnd.getFullYear() + 5);
-      if (chunkEnd > endDate) chunkEnd.setTime(endDate.getTime());
-
-      const resp = getPriceHistory(
-        'SPY',
-        cur.toISOString().slice(0, 10),
-        chunkEnd.toISOString().slice(0, 10)
-      );
-
-      if (resp && Array.isArray(resp.candles)) {
-        allCandles.push(...resp.candles);
-      }
-
-      cur = new Date(chunkEnd);
-      cur.setDate(cur.getDate() + 1);
-    }
-
-    if (allCandles.length === 0) {
-      SpreadsheetApp.getUi().alert(
-        'No SPY Data',
-        'The Schwab API returned no candles. Check your authorization and try again.',
-        SpreadsheetApp.getUi().ButtonSet.OK
-      );
+    if (spyData.length === 0) {
+      SpreadsheetApp.getUi().alert('No SPY data returned. Check authorization and try again.');
       return;
     }
 
-    // Deduplicate and sort by timestamp ascending
-    const seen = new Set();
-    const unique = allCandles
-      .filter(c => {
-        if (seen.has(c.datetime)) return false;
-        seen.add(c.datetime);
-        return true;
-      })
-      .sort((a, b) => a.datetime - b.datetime);
+    // Build date-keyed maps
+    const tz = Session.getScriptTimeZone();
+    const spyMap = {}, qqqMap = {};
+    spyData.forEach(function(c) { spyMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
+    qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
 
-    writeSPYData_(unique);
+    // All dates that appear in SPY (QQQ fills in where available)
+    const allDates = Object.keys(spyMap).sort();
 
-    ss.toast(`✅ Fetched ${unique.length} SPY trading days (${HISTORY_START} → today).`, 'Complete', 10);
+    // Base prices at first date
+    const baseSPY = spyMap[allDates[0]];
+    const baseQQQ = qqqMap[allDates[0]] || null;
+
+    const rows = allDates.map(function(d) {
+      const spyClose = spyMap[d];
+      const qqqClose = qqqMap[d] || '';
+      return [
+        new Date(d),
+        spyClose,
+        roundTo2_(spyClose / baseSPY * 100),
+        qqqClose,
+        qqqClose && baseQQQ ? roundTo2_(qqqClose / baseQQQ * 100) : '',
+      ];
+    });
+
+    const sheet = getOrCreateSPYSheet_();
+    const lastRow = sheet.getLastRow();
+    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+
+    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
+    sheet.getRange(2, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
+    sheet.getRange(2, 2, rows.length, 1).setNumberFormat('"$"#,##0.00');
+    sheet.getRange(2, 3, rows.length, 1).setNumberFormat('0.00');
+    sheet.getRange(2, 4, rows.length, 1).setNumberFormat('"$"#,##0.00');
+    sheet.getRange(2, 5, rows.length, 1).setNumberFormat('0.00');
+
+    ss.toast(
+      '✅ SPY: ' + spyData.length + ' days  |  QQQ: ' + qqqData.length + ' days',
+      'Benchmarks Updated', 10
+    );
   } catch (e) {
-    SpreadsheetApp.getUi().alert('SPY Fetch Error', e.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('Fetch Error', e.message, SpreadsheetApp.getUi().ButtonSet.OK);
     console.error(e);
   }
 }
@@ -101,40 +102,64 @@ function fetchSPYHistory() {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────
 
-/**
- * Writes sorted candle objects to the SPY History sheet.
- * @param {Array<{datetime: number, close: number}>} candles  Sorted ascending.
- */
-function writeSPYData_(candles) {
-  const sheet   = getOrCreateSPYSheet_();
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+/** Fetches deduplicated, sorted daily candles for one symbol. */
+function fetchCandlesForSymbol_(symbol, startDate, endDate) {
+  const allCandles = [];
+  const start = new Date(startDate);
+  const end   = new Date(endDate);
 
-  const baseClose = candles[0].close;  // index to 100 at first trading day
-  const rows = candles.map(c => [
-    new Date(c.datetime),
-    c.close,
-    (c.close / baseClose) * 100,
-  ]);
+  for (var cur = new Date(start); cur <= end; ) {
+    var chunkEnd = new Date(cur);
+    chunkEnd.setFullYear(chunkEnd.getFullYear() + 5);
+    if (chunkEnd > end) chunkEnd.setTime(end.getTime());
 
-  sheet.getRange(2, 1, rows.length, 3).setValues(rows);
-  sheet.getRange(2, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
-  sheet.getRange(2, 2, rows.length, 1).setNumberFormat('"$"#,##0.00');
-  sheet.getRange(2, 3, rows.length, 1).setNumberFormat('0.00');
+    try {
+      var resp = getPriceHistory(symbol, cur.toISOString().slice(0, 10),
+                                          chunkEnd.toISOString().slice(0, 10));
+      if (resp && Array.isArray(resp.candles)) {
+        Array.prototype.push.apply(allCandles, resp.candles);
+      }
+    } catch (e) {
+      console.warn(symbol + ' chunk error: ' + e.message);
+    }
+
+    cur = new Date(chunkEnd);
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  // Deduplicate and sort
+  var seen = {};
+  return allCandles
+    .filter(function(c) {
+      if (seen[c.datetime]) return false;
+      seen[c.datetime] = true;
+      return true;
+    })
+    .sort(function(a, b) { return a.datetime - b.datetime; });
 }
 
 /**
- * Returns a date-keyed map of SPY close prices for use in chart building.
- * @returns {Object}  { 'YYYY-MM-DD': closePrice }
+ * Returns date-keyed close price maps for SPY and QQQ from the sheet.
+ * @returns {{ spy: {date: price}, qqq: {date: price} }}
  */
-function getSPYCloseMap_() {
-  const sheet = getOrCreateSPYSheet_();
-  const data  = sheet.getDataRange().getValues().slice(1);
-  const tz    = Session.getScriptTimeZone();
-  const map   = {};
-  data.forEach(row => {
+function getBenchmarkCloseMaps_() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_SPY);
+  if (!sheet) return { spy: {}, qqq: {} };
+
+  const tz   = Session.getScriptTimeZone();
+  const spy  = {}, qqq = {};
+
+  sheet.getDataRange().getValues().slice(1).forEach(function(row) {
     if (!row[0] || !row[1]) return;
-    map[fmtDate_(new Date(row[0]), tz)] = row[1];
+    var d = fmtDate_(new Date(row[0]), tz);
+    spy[d] = parseFloat(row[1]) || 0;
+    if (row[3]) qqq[d] = parseFloat(row[3]) || 0;
   });
-  return map;
+
+  return { spy: spy, qqq: qqq };
+}
+
+function roundTo2_(n) {
+  return Math.round(n * 100) / 100;
 }
