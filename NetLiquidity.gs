@@ -164,6 +164,95 @@ function reconstructNetLiqHistoryForAccount(suffix) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Public: diagnostics
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Run this from the Apps Script editor (not the menu) to diagnose
+ * reconstruction accuracy. Check View → Logs after running.
+ * It shows:
+ *   - Starting cash + positions
+ *   - First 3 raw transactions (so we can verify field names)
+ *   - Reconstructed value for today vs actual API Net Liq
+ */
+function debugReconstruction() {
+  var suffix = '418';
+  var hash   = getHashForSuffix_(suffix);
+
+  // Current state
+  var accountData = getAccountDetails(hash);
+  var sec  = accountData.securitiesAccount || accountData;
+  var bal  = sec.currentBalances || {};
+  var cash = bal.cashBalance || 0;
+  var actualNetLiq = extractNetLiquidityFromAccount_(accountData);
+
+  var positions = {};
+  if (sec.positions) {
+    sec.positions.forEach(function(pos) {
+      var sym = pos.instrument && pos.instrument.symbol;
+      var qty = pos.longQuantity || 0;
+      if (sym && qty > 0) positions[sym] = qty;
+    });
+  }
+
+  console.log('=== Starting state ===');
+  console.log('cashBalance: ' + cash);
+  console.log('Actual Net Liq (API): ' + actualNetLiq);
+  console.log('Positions: ' + JSON.stringify(positions));
+
+  // Sample transactions
+  var end   = new Date();
+  var start = new Date();
+  start.setDate(start.getDate() - 30);
+  var txs = getTransactions(hash, start.toISOString(), end.toISOString());
+
+  console.log('\n=== Last 30 days: ' + txs.length + ' transactions ===');
+  txs.slice(0, 5).forEach(function(tx, i) {
+    console.log('\nTransaction ' + (i+1) + ':');
+    console.log('  type: '       + tx.type);
+    console.log('  tradeDate: '  + tx.tradeDate);
+    console.log('  netAmount: '  + tx.netAmount);
+    var item = tx.transactionItem;
+    if (item) {
+      console.log('  instruction: '  + item.instruction);
+      console.log('  positionEffect: '+ item.positionEffect);
+      console.log('  quantity: '     + item.quantity);
+      console.log('  price: '        + item.price);
+      var inst = item.instrument;
+      if (inst) {
+        console.log('  symbol: '   + inst.symbol);
+        console.log('  assetType: '+ inst.assetType);
+      }
+    }
+  });
+
+  // Validate today's reconstructed value
+  var allTx   = fetchAllTransactionsInChunks_(hash);
+  var symbols = new Set(Object.keys(positions));
+  allTx.forEach(function(tx) {
+    var item = tx.transactionItem;
+    if (item && item.instrument && item.instrument.assetType === 'EQUITY' && item.instrument.symbol) {
+      symbols.add(item.instrument.symbol);
+    }
+  });
+  var priceMap  = fetchPriceHistoriesForSymbols_(symbols);
+  var txByDate  = groupTransactionsByDate_(allTx);
+  var dailyVals = reconstructDailyValues_(cash, positions, txByDate, priceMap);
+
+  var todayStr  = fmtDate_(new Date());
+  var recon     = dailyVals[todayStr] || 'N/A';
+
+  console.log('\n=== Validation ===');
+  console.log('Reconstructed today (' + todayStr + '): ' + recon);
+  console.log('Actual Net Liq (API):                  ' + actualNetLiq);
+  if (typeof recon === 'number') {
+    var diff = Math.abs(recon - actualNetLiq);
+    var pct  = (diff / actualNetLiq * 100).toFixed(2);
+    console.log('Difference: $' + diff.toFixed(2) + ' (' + pct + '%)');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Public: CSV import
 // ─────────────────────────────────────────────────────────────────
 
