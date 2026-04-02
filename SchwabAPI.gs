@@ -94,6 +94,12 @@ function getPriceHistory(symbol, startDate, endDate) {
 /**
  * Resolves the encrypted account hash (caches in Script Properties)
  * then returns the account details object.
+ *
+ * If SCHWAB_ACCOUNT_HASH is already stored by your existing app, that
+ * value is used directly. Otherwise we look up all linked accounts and
+ * pick the one whose accountNumber matches SCHWAB_ACCOUNT_NUMBER (if set),
+ * falling back to the account with the largest liquidation value so we
+ * don't accidentally pick a small cash/IRA account.
  */
 function resolveAccountDetails_() {
   const props = PropertiesService.getScriptProperties();
@@ -110,8 +116,16 @@ function resolveAccountDetails_() {
       ? accounts.find(a => a.accountNumber === preferredAcctNum)
       : null;
 
-    const chosen = matched || accounts[0];
-    hash = chosen.hashValue;
+    if (matched) {
+      hash = matched.hashValue;
+    } else if (accounts.length === 1) {
+      hash = accounts[0].hashValue;
+    } else {
+      // Multiple accounts — pick the one with the highest liquidation value
+      // to avoid landing on a small cash or IRA account by accident.
+      hash = pickLargestAccount_(accounts);
+    }
+
     props.setProperty('SCHWAB_ACCOUNT_HASH', hash);
   }
 
@@ -119,9 +133,34 @@ function resolveAccountDetails_() {
 }
 
 /**
+ * Given the array from /accounts/accountNumbers, fetches each account's
+ * balance and returns the hash of whichever has the highest liquidation value.
+ * @param {Array<{accountNumber, hashValue}>} accounts
+ * @returns {string} hashValue
+ */
+function pickLargestAccount_(accounts) {
+  let bestHash  = accounts[0].hashValue;
+  let bestValue = -Infinity;
+
+  accounts.forEach(function(acct) {
+    try {
+      const details = getAccountDetails(acct.hashValue);
+      const value   = extractNetLiquidityFromAccount_(details);
+      if (value > bestValue) {
+        bestValue = value;
+        bestHash  = acct.hashValue;
+      }
+    } catch (e) {
+      console.warn('Could not fetch details for account ' + acct.accountNumber + ': ' + e.message);
+    }
+  });
+
+  return bestHash;
+}
+
+/**
  * Extracts the Net Liquidation Value from an account details response.
- * Schwab may return the value under slightly different field names
- * depending on account type (margin vs cash vs IRA).
+ * Schwab uses different field names for margin vs cash vs IRA accounts.
  * @param {Object} accountData
  * @returns {number}
  */
@@ -129,13 +168,36 @@ function extractNetLiquidityFromAccount_(accountData) {
   const sec = accountData.securitiesAccount || accountData;
   const bal = sec.currentBalances || sec.projectedBalances || {};
 
-  return (
-    bal.liquidationValue     ??
-    bal.netLiquidation       ??
-    bal.totalAccountValue    ??
-    bal.cashBalance          ??
-    0
-  );
+  // Try every known field name Schwab uses across account types
+  const candidates = [
+    bal.liquidationValue,
+    bal.netLiquidation,
+    bal.totalAccountValue,
+    bal.accountValue,
+    bal.equity,
+  ];
+
+  for (const v of candidates) {
+    if (typeof v === 'number' && v > 0) return v;
+  }
+  return 0;
+}
+
+/**
+ * Debug helper — run this once from the Apps Script editor (not the menu)
+ * to inspect the raw account API response and confirm the correct field.
+ * Check View → Logs after running.
+ */
+function debugAccountResponse() {
+  const accounts = getAccountNumbers();
+  console.log('Linked accounts: ' + JSON.stringify(accounts.map(a => a.accountNumber)));
+
+  accounts.forEach(function(acct) {
+    const details = getAccountDetails(acct.hashValue);
+    const sec = details.securitiesAccount || details;
+    console.log('\n=== Account ' + acct.accountNumber + ' ===');
+    console.log('currentBalances: ' + JSON.stringify(sec.currentBalances));
+  });
 }
 
 /**
