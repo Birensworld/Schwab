@@ -1,77 +1,90 @@
 /**
  * Schwab Equity Curve — Google Apps Script
  *
- * Plots your Portfolio Net Liquidity against SPY daily closes, both indexed
- * to 100 at a common start date, from 2020 to present.
+ * Plots Portfolio Net Liquidity vs SPY, indexed to 100 at the first
+ * common trading day, for one or more Schwab accounts.
  *
- * ─────────────────────────────────────────────────────────────────
- * SETUP (one-time)
- * ─────────────────────────────────────────────────────────────────
- * 1. In Apps Script editor: Resources > Libraries
- *    Add OAuth2 library ID: 1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF
- * 2. Register an app at https://developer.schwab.com to get your
- *    Client ID (App Key) and Client Secret.
- *    Set the callback URL to:
- *    https://script.google.com/macros/d/<YOUR_SCRIPT_ID>/usercallback
- * 3. Open this spreadsheet, use the "📈 Equity Curve" menu →
- *    "Setup & Authorize Schwab", enter your credentials, then click
- *    the authorization link.
+ * Each account gets its own "Net Liq ###" and "Equity Curve ###" tabs.
+ * SPY History is shared across all accounts.
  *
- * ─────────────────────────────────────────────────────────────────
- * WORKFLOW
- * ─────────────────────────────────────────────────────────────────
- * Historical data (2020 → today):
- *   A) "Fetch SPY History"         → pulls daily SPY closes via the
- *      Schwab Market Data API (accurate, complete).
- *   B) "Reconstruct from Transactions" → estimates daily portfolio
- *      values by replaying all transactions since 2020.
- *      ⚠ Captures realized P&L + external cash flows only.
- *         Unrealized P&L on open positions is approximated linearly.
- *         For higher accuracy, use "Import Net Liq from CSV" instead
- *         (export from schwab.com → Accounts → Performance → Export).
- *
- * Ongoing (recommended):
- *   "Enable Daily Auto-Capture" installs a 4:30 PM ET trigger that
- *   logs your live Net Liquidity every trading day.
- *
- * Build chart:
- *   "Build / Refresh Equity Curve Chart" generates a line chart on
- *   the 'Equity Curve' sheet comparing both series.
+ * ─── Account registry ────────────────────────────────────────────
+ * Add accounts here as { 'last3digits': 'fullAccountNumber' }.
+ * Account 418 is active; 973 is defined but not yet in the menu.
  */
+const ACCOUNT_CONFIGS = {
+  '418': '52172418',
+  '973': '55262973',
+};
 
-// ─── Sheet & date constants ───────────────────────────────────────
-const SHEET_NET_LIQ   = 'Net Liquidity';
-const SHEET_SPY       = 'SPY History';
-const SHEET_CHART     = 'Equity Curve';
-const HISTORY_START   = '2020-01-01';      // earliest date to pull
+// Shared constants
+const SHEET_SPY     = 'SPY History';
+const HISTORY_START = '2020-01-01';
+
+/** Returns the sheet tab names for a given account suffix. */
+function sheetNames_(suffix) {
+  return {
+    netLiq: 'Net Liq ' + suffix,
+    chart:  'Equity Curve ' + suffix,
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────
 function onOpen() {
-  const ui = SpreadsheetApp.getUi();
+  var ui = SpreadsheetApp.getUi();
+
+  var authMenu = ui.createMenu('Setup / Re-Authorize')
+    .addItem('Get Authorization Link', 'ShowAuthUrl')
+    .addItem('Exchange Code for Tokens', 'ExchangeAuthCode');
+
+  ui.createMenu('Schwab')
+    .addItem('Refresh Portfolio', 'UpdateSheet')
+    .addSeparator()
+    .addSubMenu(authMenu)
+    .addToUi();
+
   ui.createMenu('📈 Equity Curve')
-    .addItem('⚙️  Setup & Authorize Schwab',         'showSetupDialog')
-    .addItem('✅  Check Authorization Status',        'checkAuthStatus')
+    // ── SPY (shared) ──────────────────────────────────────────────
+    .addItem('📊 Fetch SPY History (2020 → Today)', 'fetchSPYHistory')
     .addSeparator()
-    .addSubMenu(ui.createMenu('📥  Fetch / Import Data')
-      .addItem('Fetch SPY History (2020 → Today)',    'fetchSPYHistory')
-      .addItem("Capture Today's Net Liquidity",       'fetchTodayNetLiq')
-      .addItem('Reconstruct History from Transactions ⚠️', 'reconstructNetLiqHistory')
-      .addItem('Import Net Liq from CSV…',            'showCsvImportDialog'))
+    // ── Account 418 ───────────────────────────────────────────────
+    .addSubMenu(ui.createMenu('💼 Account …418')
+      .addItem("Capture Today's Net Liquidity",            'fetchTodayNetLiq_418')
+      .addItem('Reconstruct History from Transactions ⚠️', 'reconstructNetLiqHistory_418')
+      .addItem('Import Net Liq from CSV…',                 'showCsvImportDialog')
+      .addSeparator()
+      .addItem('Build / Refresh Equity Curve Chart',       'buildEquityCurveChart_418'))
     .addSeparator()
-    .addItem('📈  Build / Refresh Equity Curve Chart', 'buildEquityCurveChart')
-    .addSeparator()
-    .addSubMenu(ui.createMenu('⏰  Automation')
-      .addItem('Enable Daily Snapshot (4:30 PM ET)',  'setupDailyTrigger')
-      .addItem('Disable Daily Snapshot',              'removeDailyTrigger'))
+    // ── Automation ────────────────────────────────────────────────
+    .addSubMenu(ui.createMenu('⏰ Automation')
+      .addItem('Enable Daily Snapshot – All Accounts (4:30 PM ET)', 'setupDailyTrigger')
+      .addItem('Disable Daily Snapshot',                            'removeDailyTrigger'))
     .addToUi();
 }
 
+// ─── Account 418 menu handlers ───────────────────────────────────
+function fetchTodayNetLiq_418()         { fetchTodayNetLiqForAccount('418'); }
+function reconstructNetLiqHistory_418() { reconstructNetLiqHistoryForAccount('418'); }
+function buildEquityCurveChart_418()    { buildEquityCurveChartForAccount('418'); }
+
 /**
- * One-shot helper: fetch everything and rebuild the chart.
- * Useful after initial setup.
+ * Daily trigger target — captures Net Liq for every configured account.
+ * Also callable manually from the Apps Script editor.
  */
+function fetchTodayNetLiq() {
+  Object.keys(ACCOUNT_CONFIGS).forEach(function(suffix) {
+    try {
+      fetchTodayNetLiqForAccount(suffix);
+    } catch (e) {
+      console.error('Daily snapshot failed for account ' + suffix + ': ' + e.message);
+    }
+  });
+}
+
+/** Refresh SPY + all accounts + rebuild all charts. */
 function refreshAllData() {
   fetchSPYHistory();
-  fetchTodayNetLiq();
-  buildEquityCurveChart();
+  Object.keys(ACCOUNT_CONFIGS).forEach(function(suffix) {
+    fetchTodayNetLiqForAccount(suffix);
+    buildEquityCurveChartForAccount(suffix);
+  });
 }
