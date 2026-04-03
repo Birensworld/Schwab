@@ -1,6 +1,6 @@
 /**
  * NetLiquidity.gs — Manages the shared "Net Liquidity" sheet.
- * Version: 1.1 (2026-04-03) — Calls backupNetLiq_() after API capture and CSV import.
+ * Version: 1.2 (2026-04-03) — Store dates as plain strings; handle legacy Date objects in comparison.
  *
  * Sheet layout:
  *   Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
@@ -187,7 +187,10 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
 
   for (var i = 1; i < data.length; i++) {
     if (!data[i][0]) continue;
-    if (fmtDate_(new Date(data[i][0]), tz) !== dateStr) continue;
+    // Handle both plain string dates (new rows) and legacy Date objects (manual entries)
+    var cellVal = data[i][0];
+    var cellStr = (cellVal instanceof Date) ? fmtDate_(cellVal, tz) : String(cellVal);
+    if (cellStr !== dateStr) continue;
 
     // Row already exists for this date
     var existing = data[i][col - 1];
@@ -199,7 +202,8 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
   }
 
   // No row for this date yet — append (never insert mid-sheet)
-  var newRow = [new Date(dateStr)];
+  // Use plain string date to avoid UTC midnight timezone issues
+  var newRow = [dateStr];
   ACCOUNT_ORDER.forEach(function(s) {
     newRow.push(s === suffix ? value : '');
   });
