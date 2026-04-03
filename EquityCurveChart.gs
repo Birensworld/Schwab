@@ -1,6 +1,6 @@
 /**
  * EquityCurveChart.gs — Builds a per-account equity curve chart.
- * Version: 1.8 (2026-04-03) — Full styling restored using flat dot-notation setOption() calls.
+ * Version: 1.7 (2026-04-03) — Flat setOption() calls (dot-notation) to avoid nested object chart bug.
  *           charts that caused blank rendering; bare-minimum chart config.
  *
  * Each chart plots three series indexed to 100 at the first date where
@@ -179,23 +179,10 @@ function insertLineChart_(sheet, rows, suffix) {
     .setOption('vAxis.format', '0.0')
     .setOption('series.0.color', '#1a73e8')
     .setOption('series.0.lineWidth', 2)
-    .setOption('series.0.pointSize', 0)
     .setOption('series.1.color', '#ea4335')
     .setOption('series.1.lineWidth', 2)
-    .setOption('series.1.pointSize', 0)
     .setOption('series.2.color', '#fbbc04')
-    .setOption('series.2.lineWidth', 2)
-    .setOption('series.2.pointSize', 0)
-    .setOption('backgroundColor', '#ffffff')
-    .setOption('chartArea.left', 80)
-    .setOption('chartArea.top', 60)
-    .setOption('chartArea.width', '85%')
-    .setOption('chartArea.height', '75%')
-    .setOption('interpolateNulls', true)
-    .setOption('hAxis.gridlines.color', '#e0e0e0')
-    .setOption('vAxis.gridlines.color', '#e0e0e0')
-    .setOption('vAxis.gridlines.count', 8)
-    .setOption('legend.textStyle.fontSize', 12);
+    .setOption('series.2.lineWidth', 2);
 
   sheet.insertChart(builder.build());
 }
