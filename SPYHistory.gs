@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.8 (2026-04-03) — Store dates as plain 'yyyy-MM-dd' strings; no timezone math.
+ * Version: 1.9 (2026-04-03) — Handle legacy Date-object rows alongside new plain-string rows.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -64,17 +64,25 @@ function fetchSPYHistory() {
     var fetchStart, baseSPY, baseQQQ, fullRewrite;
 
     if (lastRow > 1) {
-      // Read all existing dates (plain strings in col A) for dedup guard
+      // Read all existing dates — handle both legacy Date objects and new plain strings
       const allRows    = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
       const existingDates = {};
-      allRows.forEach(function(r) { if (r[0]) existingDates[r[0]] = true; });
+      function toDateStr_(v) {
+        if (!v) return null;
+        if (typeof v === 'string') return v;
+        return fmtDate_(v, tz);   // legacy Date object
+      }
+      allRows.forEach(function(r) {
+        var s = toDateStr_(r[0]);
+        if (s) existingDates[s] = true;
+      });
 
       // Base prices from first data row
       baseSPY = allRows[0][1];
       baseQQQ = allRows[0][3] || null;
 
-      // Last date is a plain string — split and add 1 day
-      const lastDate = allRows[allRows.length - 1][0];   // e.g. '2026-03-24'
+      // Last date — convert to string if needed, then add 1 day
+      const lastDate = toDateStr_(allRows[allRows.length - 1][0]);
       const lp       = lastDate.split('-');
       fetchStart     = fmtDate_(new Date(+lp[0], +lp[1] - 1, +lp[2] + 1), tz);
       fullRewrite    = false;
