@@ -55,13 +55,11 @@ function buildEquityCurveChartForAccount(suffix) {
     var baseQQQ    = qqqMap[baseDate] || null;
 
     var rows = commonDates.map(function(d) {
-      // Parse date as LOCAL midnight (not UTC) to avoid timezone shift on sheet
-      var p = d.split('-');
-      var localDate = new Date(+p[0], +p[1] - 1, +p[2]);
-      // Use 0 for missing QQQ so the chart range stays clean (no nulls/empty)
+      // Write date as a plain string so the chart treats col A as text
+      // categories (avoids Date serial number domain detection issues).
       var qqqIndexed = (baseQQQ && qqqMap[d]) ? roundTo2_(qqqMap[d] / baseQQQ * 100) : 0;
       return [
-        localDate,
+        d,                                             // 'YYYY-MM-DD' string
         roundTo2_(netLiqMap[d] / baseNetLiq * 100),
         roundTo2_(spyMap[d]    / baseSPY    * 100),
         qqqIndexed,
@@ -127,7 +125,6 @@ function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, bas
 
   // ── Data rows (row 2+) ────────────────────────────────────────
   sheet.getRange(2, 1, rows.length, 4).setValues(rows);
-  sheet.getRange(2, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
   sheet.getRange(2, 2, rows.length, 3).setNumberFormat('0.00');
 
   for (var i = 0; i < rows.length; i++) {
@@ -149,17 +146,12 @@ function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, bas
 // ─────────────────────────────────────────────────────────────────
 
 function insertLineChart_(sheet, dataRows, suffix) {
-  // Use separate ranges so the chart builder unambiguously knows:
-  //   col 1 = X-axis domain (dates)
-  //   cols 2-4 = three series
-  // setNumHeaders(1) tells it row 1 is labels, not data points.
-  var n = dataRows + 1; // header + data rows
+  // Single contiguous range: col A = domain (string dates as categories),
+  // cols B-D = three series. setNumHeaders(1) = row 1 is labels.
+  var n = dataRows + 1; // header row + data rows
   var chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
-    .addRange(sheet.getRange(1, 1, n, 1))   // Date (domain)
-    .addRange(sheet.getRange(1, 2, n, 1))   // Portfolio
-    .addRange(sheet.getRange(1, 3, n, 1))   // SPY
-    .addRange(sheet.getRange(1, 4, n, 1))   // QQQ
+    .addRange(sheet.getRange(1, 1, n, 4))
     .setNumHeaders(1)
     .setPosition(dataRows + 5, 1, 0, 0)
     .setOption('title', 'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
