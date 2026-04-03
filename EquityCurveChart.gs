@@ -55,10 +55,13 @@ function buildEquityCurveChartForAccount(suffix) {
     var baseQQQ    = qqqMap[baseDate] || null;
 
     var rows = commonDates.map(function(d) {
-      // Use null (not '') for missing QQQ — empty strings break chart rendering
-      var qqqIndexed = (baseQQQ && qqqMap[d]) ? roundTo2_(qqqMap[d] / baseQQQ * 100) : null;
+      // Parse date as LOCAL midnight (not UTC) to avoid timezone shift on sheet
+      var p = d.split('-');
+      var localDate = new Date(+p[0], +p[1] - 1, +p[2]);
+      // Use 0 for missing QQQ so the chart range stays clean (no nulls/empty)
+      var qqqIndexed = (baseQQQ && qqqMap[d]) ? roundTo2_(qqqMap[d] / baseQQQ * 100) : 0;
       return [
-        new Date(d),
+        localDate,
         roundTo2_(netLiqMap[d] / baseNetLiq * 100),
         roundTo2_(spyMap[d]    / baseSPY    * 100),
         qqqIndexed,
@@ -141,19 +144,14 @@ function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, bas
 // ─────────────────────────────────────────────────────────────────
 
 function insertLineChart_(sheet, dataRows, suffix) {
-  // Use separate ranges: col 1 (dates) as domain, cols 2-4 as series.
-  // This is more reliable than a single combined range for date-axis charts.
-  var dateRange      = sheet.getRange(6, 1, dataRows, 1);   // dates only (no header)
-  var portfolioRange = sheet.getRange(5, 2, dataRows + 1, 1); // header + portfolio
-  var spyRange       = sheet.getRange(5, 3, dataRows + 1, 1); // header + SPY
-  var qqqRange       = sheet.getRange(5, 4, dataRows + 1, 1); // header + QQQ
+  // Single contiguous range: header row (5) + all data rows.
+  // Google Sheets reliably uses row 5 (text) as series labels and
+  // col 1 (dates) as the X-axis domain with this layout.
+  var dataRange = sheet.getRange(5, 1, dataRows + 1, 4);
 
   var chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
-    .addRange(dateRange)
-    .addRange(portfolioRange)
-    .addRange(spyRange)
-    .addRange(qqqRange)
+    .addRange(dataRange)
     .setPosition(dataRows + 8, 1, 0, 0)
     .setOption('title', 'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
     .setOption('titleTextStyle', { fontSize: 17, bold: true, color: '#202124' })
