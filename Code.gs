@@ -1,6 +1,6 @@
 /**
  * Code.gs — Schwab Portfolio + Equity Curve — Google Apps Script
- * Version: 2.1 (2026-04-03)
+ * Version: 2.2 (2026-04-03)
  *
  * Entry point: onOpen() builds all menus.
  * Functionality is split across separate files:
@@ -10,7 +10,6 @@
  *   NetLiquidity.gs    — Net Liquidity sheet management
  *   SPYHistory.gs      — SPY + QQQ price history
  *   EquityCurveChart.gs — Indexed equity curve charts
- *   ActualValuesChart.gs — Actual dollar value charts
  *   SchwabAPI.gs       — Low-level Schwab API wrappers
  *   Backup.gs          — Backup to SPY_NetLiq_Backup spreadsheet
  *   Triggers.gs        — Daily trigger setup / teardown
@@ -60,18 +59,15 @@ function onOpen() {
     .addSubMenu(ui.createMenu('💼 Account …418')
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_418')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_418')
-      .addItem('Build / Refresh Actual Values Chart', 'buildActualValuesChart_418'))
+      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_418'))
     .addSubMenu(ui.createMenu('💼 Account …973')
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_973')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_973')
-      .addItem('Build / Refresh Actual Values Chart', 'buildActualValuesChart_973'))
+      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_973'))
     .addSubMenu(ui.createMenu('💼 Account …317')
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_317')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_317')
-      .addItem('Build / Refresh Actual Values Chart', 'buildActualValuesChart_317'))
+      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_317'))
     .addSeparator()
     .addSubMenu(ui.createMenu('⏰ Automation')
       .addItem('Enable Daily Snapshot – All Accounts (4:30 PM ET)', 'setupDailyTrigger')
@@ -86,9 +82,6 @@ function fetchTodayNetLiq_317()       { fetchTodayNetLiqForAccount('317'); }
 function buildEquityCurveChart_418()  { buildEquityCurveChartForAccount('418'); }
 function buildEquityCurveChart_973()  { buildEquityCurveChartForAccount('973'); }
 function buildEquityCurveChart_317()  { buildEquityCurveChartForAccount('317'); }
-function buildActualValuesChart_418() { buildActualValuesChartForAccount('418'); }
-function buildActualValuesChart_973() { buildActualValuesChartForAccount('973'); }
-function buildActualValuesChart_317() { buildActualValuesChartForAccount('317'); }
 
 // ─── Batch helpers ────────────────────────────────────────────────
 
