@@ -4,11 +4,17 @@
  * Sheet layout:
  *   Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
  *
- * Column positions are determined by ACCOUNT_ORDER in Code.gs.
- * All accounts share one sheet; each has its own column.
+ * ╔══════════════════════════════════════════════════════════════╗
+ * ║  DATA SAFETY GUARANTEE                                       ║
+ * ║  No function in this file ever deletes or clears rows from   ║
+ * ║  the Net Liquidity sheet. All writes are append-only or      ║
+ * ║  single-cell updates. Manually entered values are preserved. ║
+ * ╚══════════════════════════════════════════════════════════════╝
  *
- * Daily trigger writes only if no value exists yet for that date
- * (preserves manually entered values).
+ * Write rules:
+ *   • Daily trigger (skipIfExists=true)  → only adds new dates, never overwrites
+ *   • Menu "Capture Today"  (skipIfExists=true)  → same; won't overwrite manual entry
+ *   • CSV import            (skipIfExists=false) → fills empty cells only if you choose
  */
 
 // ─────────────────────────────────────────────────────────────────
@@ -47,10 +53,19 @@ function getOrCreateNetLiqSheet_() {
  * @param {boolean} skipIfExists  If true, don't overwrite an existing value for today
  */
 function fetchTodayNetLiqForAccount(suffix, skipIfExists) {
+  // Default to true — never overwrite an existing (possibly manual) entry
+  if (skipIfExists === undefined) skipIfExists = true;
   try {
     var value   = fetchNetLiqForSuffix_(suffix);
     var dateStr = todayStr_();
-    upsertNetLiqRow_(suffix, dateStr, value, 'API', skipIfExists);
+    var written = upsertNetLiqRow_(suffix, dateStr, value, 'API', skipIfExists);
+    if (!written) {
+      SpreadsheetApp.getActiveSpreadsheet().toast(
+        'Account …' + suffix + ': entry for ' + dateStr + ' already exists — skipped.',
+        'ℹ️ No Change', 5
+      );
+      return;
+    }
     SpreadsheetApp.getActiveSpreadsheet().toast(
       'Account …' + suffix + '  Net Liq: $' +
         value.toLocaleString('en-US', { minimumFractionDigits: 2 }),
@@ -154,26 +169,33 @@ function debugReconstruction() {
  * @param {string}  source        'API', 'Manual', 'CSV Import', etc.
  * @param {boolean} skipIfExists  If true and a non-empty value already exists, do nothing
  */
+/**
+ * Appends a new date row or fills a single account cell.
+ * NEVER deletes or clears any row.
+ * @returns {boolean} true if a value was written, false if skipped
+ */
 function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
   var sheet  = getOrCreateNetLiqSheet_();
   var tz     = Session.getScriptTimeZone();
-  var col    = netLiqCol_(suffix);                   // column for this account
-  var srcCol = ACCOUNT_ORDER.length + 2;             // Source is last column
+  var col    = netLiqCol_(suffix);       // 1-based column for this account
+  var srcCol = ACCOUNT_ORDER.length + 2; // Source is always the last column
   var data   = sheet.getDataRange().getValues();
 
   for (var i = 1; i < data.length; i++) {
     if (!data[i][0]) continue;
     if (fmtDate_(new Date(data[i][0]), tz) !== dateStr) continue;
 
-    // Row found for this date
+    // Row already exists for this date
     var existing = data[i][col - 1];
-    if (skipIfExists && existing !== '' && existing !== 0 && existing !== null) return;
+    var hasValue = (existing !== '' && existing !== 0 && existing !== null && existing !== undefined);
+    if (skipIfExists && hasValue) return false;  // preserve existing value
+
     sheet.getRange(i + 1, col).setValue(value);
     sheet.getRange(i + 1, srcCol).setValue(source);
-    return;
+    return true;
   }
 
-  // No row for this date — append a new one
+  // No row for this date yet — append (never insert mid-sheet)
   var newRow = [new Date(dateStr)];
   ACCOUNT_ORDER.forEach(function(s) {
     newRow.push(s === suffix ? value : '');
@@ -181,6 +203,7 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
   newRow.push(source);
   sheet.appendRow(newRow);
   sortNetLiqSheet_(sheet);
+  return true;
 }
 
 function sortNetLiqSheet_(sheet) {
