@@ -76,6 +76,10 @@ function buildEquityCurveChartForAccount(suffix) {
     var chartSheet = getOrCreateChartSheet_(ss, suffix);
     writeChartData_(chartSheet, rows, suffix, baseDate, baseNetLiq, baseSPY, baseQQQ);
 
+    // Flush ensures all cell writes are committed before the chart
+    // builder reads the range — without this the chart sees empty cells.
+    SpreadsheetApp.flush();
+
     // ── 5. Draw chart ─────────────────────────────────────────────
     chartSheet.getCharts().forEach(function(c) { chartSheet.removeChart(c); });
     insertLineChart_(chartSheet, rows.length, suffix);
@@ -188,6 +192,39 @@ function insertLineChart_(sheet, dataRows, suffix) {
     .build();
 
   sheet.insertChart(chart);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Debug helper — run this manually from Apps Script editor if chart
+// is still blank. Logs the first 5 rows of the chart sheet so you
+// can confirm what's actually written to the cells.
+// ─────────────────────────────────────────────────────────────────
+
+function debugChartSheet(suffix) {
+  suffix = suffix || '418';
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(chartSheetName_(suffix));
+  if (!sheet) { console.log('Sheet not found: ' + chartSheetName_(suffix)); return; }
+
+  var vals  = sheet.getRange(1, 1, 6, 4).getValues();
+  var types = sheet.getRange(1, 1, 6, 4).getValues().map(function(row) {
+    return row.map(function(v) { return typeof v + ' | ' + Object.prototype.toString.call(v); });
+  });
+
+  console.log('=== Chart sheet values (rows 1-6) ===');
+  vals.forEach(function(row, i) { console.log('Row ' + (i+1) + ': ' + JSON.stringify(row)); });
+  console.log('=== Cell types ===');
+  types.forEach(function(row, i) { console.log('Row ' + (i+1) + ': ' + row.join(' || ')); });
+
+  var charts = sheet.getCharts();
+  console.log('Charts on sheet: ' + charts.length);
+  if (charts.length > 0) {
+    var ranges = charts[0].getRanges();
+    console.log('Chart ranges: ' + ranges.length);
+    ranges.forEach(function(r, i) {
+      console.log('  Range ' + i + ': ' + r.getA1Notation() + '  numRows=' + r.getNumRows() + '  numCols=' + r.getNumColumns());
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
