@@ -202,7 +202,6 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
   });
   newRow.push(source);
   sheet.appendRow(newRow);
-  sortNetLiqSheet_(sheet);
   return true;
 }
 
