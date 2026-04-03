@@ -1,5 +1,6 @@
 /**
  * NetLiquidity.gs — Manages the shared "Net Liquidity" sheet.
+ * Version: 1.1 (2026-04-03) — Calls backupNetLiq_() after API capture and CSV import.
  *
  * Sheet layout:
  *   Date | Net Liq 418 ($) | Net Liq 973 ($) | Source

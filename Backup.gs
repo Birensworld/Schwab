@@ -1,6 +1,6 @@
 /**
  * Backup.gs — Mirrors Net Liquidity and SPY/QQQ data to a backup spreadsheet.
- * Version: 1.0 (2026-04-03)
+ * Version: 1.1 (2026-04-03) — Added backup hooks from NetLiquidity + SPYHistory
  *
  * Backup spreadsheet: "SPY_NetLiq_Backup"
  *   Tab "NetLiq_History"  ← mirrors "Net Liquidity" sheet (same columns)
