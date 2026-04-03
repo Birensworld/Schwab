@@ -61,9 +61,11 @@ function fetchSPYHistory() {
     // All dates that appear in SPY (QQQ fills in where available)
     const allDates = Object.keys(spyMap).sort();
 
-    // Base prices at first date
-    const baseSPY = spyMap[allDates[0]];
-    const baseQQQ = qqqMap[allDates[0]] || null;
+    // Base = first trading day on or after HISTORY_START (Jan 1 2026 is a holiday;
+    // the market opens Jan 2 2026, which will be the first candle in the data)
+    const baseDate = allDates.find(function(d) { return d >= HISTORY_START; }) || allDates[0];
+    const baseSPY  = spyMap[baseDate];
+    const baseQQQ  = qqqMap[baseDate] || null;
 
     const rows = allDates.map(function(d) {
       const spyClose = spyMap[d];
@@ -140,6 +142,8 @@ function fetchCandlesForSymbol_(symbol, startDate, endDate) {
 
 /**
  * Returns date-keyed close price maps for SPY and QQQ from the sheet.
+ * The chart builder uses these raw closes; it re-normalizes to 100 at
+ * the first date where all series (portfolio + both benchmarks) overlap.
  * @returns {{ spy: {date: price}, qqq: {date: price} }}
  */
 function getBenchmarkCloseMaps_() {
@@ -147,8 +151,8 @@ function getBenchmarkCloseMaps_() {
   const sheet = ss.getSheetByName(SHEET_SPY);
   if (!sheet) return { spy: {}, qqq: {} };
 
-  const tz   = Session.getScriptTimeZone();
-  const spy  = {}, qqq = {};
+  const tz  = Session.getScriptTimeZone();
+  const spy = {}, qqq = {};
 
   sheet.getDataRange().getValues().slice(1).forEach(function(row) {
     if (!row[0] || !row[1]) return;
