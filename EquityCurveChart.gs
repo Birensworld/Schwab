@@ -79,7 +79,6 @@ function buildEquityCurveChartForAccount(suffix) {
     SpreadsheetApp.flush();
 
     // ── 5. Draw chart ─────────────────────────────────────────────
-    chartSheet.getCharts().forEach(function(c) { chartSheet.removeChart(c); });
     insertLineChart_(chartSheet, rows.length, suffix);
 
     ss.setActiveSheet(chartSheet);
@@ -99,15 +98,10 @@ function buildEquityCurveChartForAccount(suffix) {
 // ─────────────────────────────────────────────────────────────────
 
 function getOrCreateChartSheet_(ss, suffix) {
-  var name  = chartSheetName_(suffix);
-  var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-  } else {
-    sheet.clearContents();
-    sheet.clearFormats();
-  }
-  return sheet;
+  var name     = chartSheetName_(suffix);
+  var existing = ss.getSheetByName(name);
+  if (existing) ss.deleteSheet(existing);
+  return ss.insertSheet(name);
 }
 
 function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, baseQQQ) {
