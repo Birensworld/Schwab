@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.5 (2026-04-03) — Fix: initialize existingDates before if-block to avoid ReferenceError.
+ * Version: 1.6 (2026-04-03) — Fix: parse lastDateStr as local midnight for correct nextDay calculation.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -81,8 +81,10 @@ function fetchSPYHistory() {
         if (r[0]) existingDates[r[0]] = true;
       });
 
-      const nextDay = new Date(lastDateStr);
-      nextDay.setDate(nextDay.getDate() + 1);
+      // Parse lastDateStr ('yyyy-mm-dd') as LOCAL midnight to avoid UTC
+      // timezone shift in setDate()+1 calculation.
+      var lp = lastDateStr.split('-');
+      var nextDay = new Date(+lp[0], +lp[1] - 1, +lp[2] + 1);
       fetchStart  = fmtDate_(nextDay, tz);
       fullRewrite = false;
 
