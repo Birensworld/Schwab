@@ -90,6 +90,7 @@ function fetchSPYHistory() {
     sheet.getRange(2, 4, rows.length, 1).setNumberFormat('"$"#,##0.00');
     sheet.getRange(2, 5, rows.length, 1).setNumberFormat('0.00');
 
+    backupSPYHistory_();
     ss.toast(
       '✅ SPY: ' + spyData.length + ' days  |  QQQ: ' + qqqData.length + ' days',
       'Benchmarks Updated', 10

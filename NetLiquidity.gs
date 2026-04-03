@@ -67,6 +67,7 @@ function fetchTodayNetLiqForAccount(suffix, skipIfExists) {
       );
       return;
     }
+    backupNetLiq_();
     SpreadsheetApp.getActiveSpreadsheet().toast(
       'Account …' + suffix + '  Net Liq: $' +
         value.toLocaleString('en-US', { minimumFractionDigits: 2 }),
@@ -98,6 +99,7 @@ function importNetLiqFromCsv(rows, suffix) {
     if (isNaN(d.getTime())) return;
     upsertNetLiqRow_(suffix, fmtDate_(d, tz), row.value, 'CSV Import', false);
   });
+  backupNetLiq_();
   return 'Imported ' + rows.length + ' rows into account …' + suffix + '.';
 }
 
