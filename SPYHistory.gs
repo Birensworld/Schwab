@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.3 (2026-04-03) — Fix: write dates as local midnight to avoid timezone shift causing duplicate rows.
+ * Version: 1.4 (2026-04-03) — Fix duplicate rows: use getDisplayValues() for last date + dedup guard.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -61,15 +61,26 @@ function fetchSPYHistory() {
     var fetchStart, baseSPY, baseQQQ, fullRewrite;
 
     if (lastRow > 1) {
-      // Incremental: only fetch dates after the last row
-      const existing = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      // Incremental: only fetch dates after the last row.
+      const dataRows = lastRow - 1;
 
-      // Base prices live in the first data row (indexed = 100 there)
-      baseSPY = existing[0][1];               // SPY Close ($)
-      baseQQQ = existing[0][3] || null;       // QQQ Close ($)
+      // Read numeric values for base prices (row 2 = base date, indexed = 100)
+      const firstRow = sheet.getRange(2, 1, 1, 4).getValues()[0];
+      baseSPY = firstRow[1];          // SPY Close ($)
+      baseQQQ = firstRow[3] || null;  // QQQ Close ($)
 
-      const lastDate = fmtDate_(new Date(existing[existing.length - 1][0]), tz);
-      const nextDay  = new Date(lastDate);
+      // Use getDisplayValues() to read the last date as the string shown in the
+      // cell (e.g. '2026-04-02'). This avoids timezone shift issues that occur
+      // when converting a stored Date serial back through fmtDate_().
+      const lastDateStr = sheet.getRange(lastRow, 1).getDisplayValue(); // 'yyyy-mm-dd'
+
+      // Build a set of all dates already in the sheet for the dedup guard below
+      const existingDates = {};
+      sheet.getRange(2, 1, dataRows, 1).getDisplayValues().forEach(function(r) {
+        if (r[0]) existingDates[r[0]] = true;
+      });
+
+      const nextDay = new Date(lastDateStr);
       nextDay.setDate(nextDay.getDate() + 1);
       fetchStart  = fmtDate_(nextDay, tz);
       fullRewrite = false;
@@ -109,7 +120,17 @@ function fetchSPYHistory() {
     }
 
     // ── Build and write new rows ──────────────────────────────────
-    const newRows = newDates.map(function(d) {
+    // Dedup guard: skip any date already present in the sheet
+    const datesToWrite = fullRewrite
+      ? newDates
+      : newDates.filter(function(d) { return !existingDates[d]; });
+
+    if (datesToWrite.length === 0) {
+      ss.toast('SPY/QQQ history is already up to date.', 'No Update Needed', 5);
+      return;
+    }
+
+    const newRows = datesToWrite.map(function(d) {
       const spyClose = spyMap[d];
       const qqqClose = qqqMap[d] || '';
       // Parse as LOCAL midnight so reading back with fmtDate_() always
