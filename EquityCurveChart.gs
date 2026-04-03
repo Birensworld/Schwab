@@ -145,12 +145,18 @@ function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, bas
 // ─────────────────────────────────────────────────────────────────
 
 function insertLineChart_(sheet, dataRows, suffix) {
-  // Header is row 1, data rows 2..(dataRows+1) — total dataRows+1 rows.
-  var dataRange = sheet.getRange(1, 1, dataRows + 1, 4);
-
+  // Use separate ranges so the chart builder unambiguously knows:
+  //   col 1 = X-axis domain (dates)
+  //   cols 2-4 = three series
+  // setNumHeaders(1) tells it row 1 is labels, not data points.
+  var n = dataRows + 1; // header + data rows
   var chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
-    .addRange(dataRange)
+    .addRange(sheet.getRange(1, 1, n, 1))   // Date (domain)
+    .addRange(sheet.getRange(1, 2, n, 1))   // Portfolio
+    .addRange(sheet.getRange(1, 3, n, 1))   // SPY
+    .addRange(sheet.getRange(1, 4, n, 1))   // QQQ
+    .setNumHeaders(1)
     .setPosition(dataRows + 5, 1, 0, 0)
     .setOption('title', 'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
     .setOption('titleTextStyle', { fontSize: 17, bold: true, color: '#202124' })
