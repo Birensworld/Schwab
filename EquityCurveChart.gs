@@ -1,6 +1,6 @@
 /**
  * EquityCurveChart.gs — Builds a per-account equity curve chart.
- * Version: 1.6 (2026-04-03) — Tight Y-axis viewWindow + restored styling for better line separation.
+ * Version: 1.7 (2026-04-03) — Flat setOption() calls (dot-notation) to avoid nested object chart bug.
  *           charts that caused blank rendering; bare-minimum chart config.
  *
  * Each chart plots three series indexed to 100 at the first date where
@@ -146,54 +146,45 @@ function insertLineChart_(sheet, rows, suffix) {
   var n        = dataRows + 1; // header + data rows
 
   // ── Compute tight Y-axis bounds from actual data ──────────────
-  // Columns 1-3 (0-indexed) hold the three indexed series.
   var allVals = [];
   rows.forEach(function(r) {
     [r[1], r[2], r[3]].forEach(function(v) {
       if (typeof v === 'number' && v > 0) allVals.push(v);
     });
   });
-  var dataMin = Math.min.apply(null, allVals);
-  var dataMax = Math.max.apply(null, allVals);
-  // Add 10% padding so lines don't hug the edges
-  var padding  = Math.max((dataMax - dataMin) * 0.10, 1);
-  var yMin     = Math.floor(dataMin - padding);
-  var yMax     = Math.ceil(dataMax  + padding);
+  var dataMin = allVals.length ? Math.min.apply(null, allVals) : 90;
+  var dataMax = allVals.length ? Math.max.apply(null, allVals) : 110;
+  var padding = Math.max((dataMax - dataMin) * 0.10, 1);
+  var yMin    = Math.floor(dataMin - padding);
+  var yMax    = Math.ceil(dataMax  + padding);
 
-  var chart = sheet.newChart()
+  // Build chart with flat (non-nested) options where possible to avoid
+  // Apps Script chart builder issues with complex nested option objects.
+  var builder = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
     .addRange(sheet.getRange(1, 1, n, 4))
     .setNumHeaders(1)
     .setPosition(dataRows + 5, 1, 0, 0)
-    .setOption('title', 'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
-    .setOption('titleTextStyle', { fontSize: 16, bold: true, color: '#202124' })
-    .setOption('hAxis', {
-      title: 'Date',
-      titleTextStyle: { bold: true, color: '#444' },
-      slantedText: true, slantedTextAngle: 30,
-      gridlines: { color: '#e0e0e0' },
-    })
-    .setOption('vAxis', {
-      title: 'Indexed Value (Base = 100)',
-      titleTextStyle: { bold: true, color: '#444' },
-      viewWindow: { min: yMin, max: yMax },
-      gridlines: { count: 8, color: '#e0e0e0' },
-      format: '0.0',
-    })
-    .setOption('series', {
-      0: { color: '#1a73e8', lineWidth: 2, pointSize: 0 },  // Portfolio — blue
-      1: { color: '#ea4335', lineWidth: 2, pointSize: 0 },  // SPY — red
-      2: { color: '#fbbc04', lineWidth: 2, pointSize: 0 },  // QQQ — amber
-    })
-    .setOption('legend',      { position: 'top', textStyle: { fontSize: 12 } })
-    .setOption('width',        1200)
-    .setOption('height',       550)
-    .setOption('backgroundColor', { fill: '#ffffff' })
-    .setOption('chartArea',   { left: 80, top: 60, width: '85%', height: '75%' })
-    .setOption('interpolateNulls', true)
-    .build();
+    .setOption('title',  'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
+    .setOption('width',  1200)
+    .setOption('height', 550)
+    .setOption('legend.position', 'top')
+    .setOption('hAxis.title', 'Date')
+    .setOption('hAxis.slantedText', true)
+    .setOption('hAxis.slantedTextAngle', 30)
+    .setOption('vAxis.title', 'Indexed Value (Base = 100)')
+    .setOption('vAxis.viewWindowMode', 'explicit')
+    .setOption('vAxis.viewWindow.min', yMin)
+    .setOption('vAxis.viewWindow.max', yMax)
+    .setOption('vAxis.format', '0.0')
+    .setOption('series.0.color', '#1a73e8')
+    .setOption('series.0.lineWidth', 2)
+    .setOption('series.1.color', '#ea4335')
+    .setOption('series.1.lineWidth', 2)
+    .setOption('series.2.color', '#fbbc04')
+    .setOption('series.2.lineWidth', 2);
 
-  sheet.insertChart(chart);
+  sheet.insertChart(builder.build());
 }
 
 // ─────────────────────────────────────────────────────────────────
