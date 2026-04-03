@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.1 (2026-04-03) — Calls backupSPYHistory_() after fetch completes.
+ * Version: 1.2 (2026-04-03) — Incremental fetch: only pulls new dates, appends rows.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -36,39 +36,80 @@ function getOrCreateSPYSheet_() {
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Fetches daily closes for SPY and QQQ from HISTORY_START to today
- * and writes them to the SPY History sheet.
+ * Fetches daily closes for SPY and QQQ and writes them to the SPY History sheet.
+ *
+ * Incremental mode (sheet already has data):
+ *   - Reads the last date from the sheet
+ *   - Fetches only dates after that → appends new rows
+ *   - Base prices are read from the first data row (where indexed = 100)
+ *
+ * Full mode (sheet is empty):
+ *   - Fetches from HISTORY_START to today and writes all rows
  */
 function fetchSPYHistory() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const today = new Date().toISOString().slice(0, 10);
+  const tz    = Session.getScriptTimeZone();
+
   try {
     ss.toast('Fetching SPY and QQQ price history…', 'Working', -1);
 
-    const today   = new Date().toISOString().slice(0, 10);
-    const spyData = fetchCandlesForSymbol_('SPY', HISTORY_START, today);
-    const qqqData = fetchCandlesForSymbol_('QQQ', HISTORY_START, today);
+    const sheet   = getOrCreateSPYSheet_();
+    const lastRow = sheet.getLastRow();
+
+    // ── Determine fetch window and base prices ────────────────────
+    var fetchStart, baseSPY, baseQQQ, fullRewrite;
+
+    if (lastRow > 1) {
+      // Incremental: only fetch dates after the last row
+      const existing = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+
+      // Base prices live in the first data row (indexed = 100 there)
+      baseSPY = existing[0][1];               // SPY Close ($)
+      baseQQQ = existing[0][3] || null;       // QQQ Close ($)
+
+      const lastDate = fmtDate_(new Date(existing[existing.length - 1][0]), tz);
+      const nextDay  = new Date(lastDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      fetchStart  = fmtDate_(nextDay, tz);
+      fullRewrite = false;
+
+      if (fetchStart > today) {
+        ss.toast('SPY/QQQ history is already up to date.', 'No Update Needed', 5);
+        return;
+      }
+    } else {
+      // Full fetch from scratch
+      fetchStart  = HISTORY_START;
+      fullRewrite = true;
+    }
+
+    // ── Fetch from Schwab ─────────────────────────────────────────
+    const spyData = fetchCandlesForSymbol_('SPY', fetchStart, today);
+    const qqqData = fetchCandlesForSymbol_('QQQ', fetchStart, today);
 
     if (spyData.length === 0) {
-      SpreadsheetApp.getUi().alert('No SPY data returned. Check authorization and try again.');
+      ss.toast('No new SPY data since ' + fetchStart + '.', 'Already Up To Date', 5);
       return;
     }
 
-    // Build date-keyed maps
-    const tz = Session.getScriptTimeZone();
     const spyMap = {}, qqqMap = {};
     spyData.forEach(function(c) { spyMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
     qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
 
-    // All dates that appear in SPY (QQQ fills in where available)
-    const allDates = Object.keys(spyMap).sort();
+    const newDates = Object.keys(spyMap).sort();
 
-    // Base = first trading day on or after HISTORY_START (Jan 1 2026 is a holiday;
-    // the market opens Jan 2 2026, which will be the first candle in the data)
-    const baseDate = allDates.find(function(d) { return d >= HISTORY_START; }) || allDates[0];
-    const baseSPY  = spyMap[baseDate];
-    const baseQQQ  = qqqMap[baseDate] || null;
+    if (fullRewrite) {
+      // Establish base prices from the first trading day
+      const baseDate = newDates.find(function(d) { return d >= HISTORY_START; }) || newDates[0];
+      baseSPY = spyMap[baseDate];
+      baseQQQ = qqqMap[baseDate] || null;
+      // Clear all existing data rows
+      if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
+    }
 
-    const rows = allDates.map(function(d) {
+    // ── Build and write new rows ──────────────────────────────────
+    const newRows = newDates.map(function(d) {
       const spyClose = spyMap[d];
       const qqqClose = qqqMap[d] || '';
       return [
@@ -80,20 +121,17 @@ function fetchSPYHistory() {
       ];
     });
 
-    const sheet = getOrCreateSPYSheet_();
-    const lastRow = sheet.getLastRow();
-    if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-
-    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
-    sheet.getRange(2, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
-    sheet.getRange(2, 2, rows.length, 1).setNumberFormat('"$"#,##0.00');
-    sheet.getRange(2, 3, rows.length, 1).setNumberFormat('0.00');
-    sheet.getRange(2, 4, rows.length, 1).setNumberFormat('"$"#,##0.00');
-    sheet.getRange(2, 5, rows.length, 1).setNumberFormat('0.00');
+    const startRow = sheet.getLastRow() + 1;
+    sheet.getRange(startRow, 1, newRows.length, 5).setValues(newRows);
+    sheet.getRange(startRow, 1, newRows.length, 1).setNumberFormat('yyyy-mm-dd');
+    sheet.getRange(startRow, 2, newRows.length, 1).setNumberFormat('"$"#,##0.00');
+    sheet.getRange(startRow, 3, newRows.length, 1).setNumberFormat('0.00');
+    sheet.getRange(startRow, 4, newRows.length, 1).setNumberFormat('"$"#,##0.00');
+    sheet.getRange(startRow, 5, newRows.length, 1).setNumberFormat('0.00');
 
     backupSPYHistory_();
     ss.toast(
-      '✅ SPY: ' + spyData.length + ' days  |  QQQ: ' + qqqData.length + ' days',
+      '✅ Added ' + newRows.length + ' new day(s) — SPY & QQQ',
       'Benchmarks Updated', 10
     );
   } catch (e) {
