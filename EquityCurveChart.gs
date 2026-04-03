@@ -8,7 +8,7 @@
  *   • QQQ
  *
  * Chart sheet: "Equity Curve 418", "Equity Curve 973", etc.
- * Data sheet:  rows 5+ contain Date | Portfolio | SPY | QQQ (all indexed)
+ * Data layout: row 1 = header, rows 2+ = Date | Portfolio | SPY | QQQ (all indexed)
  */
 
 // ─────────────────────────────────────────────────────────────────
@@ -109,34 +109,35 @@ function getOrCreateChartSheet_(ss, suffix) {
 }
 
 function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, baseQQQ) {
-  // ── Meta (rows 1–3) ───────────────────────────────────────────
-  sheet.getRange(1, 1, 3, 2).setValues([
-    ['Account',     '…' + suffix],
-    ['Base Date',   baseDate],
-    ['Base Net Liq','$' + baseNetLiq.toLocaleString('en-US', { minimumFractionDigits: 2 })],
-  ]);
-  sheet.getRange(1, 1, 3, 2).setFontColor('#888888').setFontStyle('italic');
-
-  // ── Header row (row 5) ────────────────────────────────────────
-  var hdr = sheet.getRange(5, 1, 1, 4);
+  // ── Header row (row 1) ────────────────────────────────────────
+  var hdr = sheet.getRange(1, 1, 1, 4);
   hdr.setValues([['Date', 'Portfolio …' + suffix + ' (Indexed)', 'SPY (Indexed)', 'QQQ (Indexed)']]);
   hdr.setFontWeight('bold').setBackground('#0b5394').setFontColor('#ffffff')
      .setHorizontalAlignment('center');
 
-  sheet.setFrozenRows(5);
+  sheet.setFrozenRows(1);
   sheet.setColumnWidth(1, 120);
   sheet.setColumnWidth(2, 200);
   sheet.setColumnWidth(3, 150);
   sheet.setColumnWidth(4, 150);
 
-  // ── Data rows (row 6+) ────────────────────────────────────────
-  sheet.getRange(6, 1, rows.length, 4).setValues(rows);
-  sheet.getRange(6, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
-  sheet.getRange(6, 2, rows.length, 3).setNumberFormat('0.00');
+  // ── Data rows (row 2+) ────────────────────────────────────────
+  sheet.getRange(2, 1, rows.length, 4).setValues(rows);
+  sheet.getRange(2, 1, rows.length, 1).setNumberFormat('yyyy-mm-dd');
+  sheet.getRange(2, 2, rows.length, 3).setNumberFormat('0.00');
 
   for (var i = 0; i < rows.length; i++) {
-    if (i % 2 === 0) sheet.getRange(6 + i, 1, 1, 4).setBackground('#f8f9fa');
+    if (i % 2 === 0) sheet.getRange(2 + i, 1, 1, 4).setBackground('#f8f9fa');
   }
+
+  // ── Meta (below data) ─────────────────────────────────────────
+  var metaRow = rows.length + 3;
+  sheet.getRange(metaRow, 1, 3, 2).setValues([
+    ['Account',     '…' + suffix],
+    ['Base Date',   baseDate],
+    ['Base Net Liq','$' + baseNetLiq.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+  ]);
+  sheet.getRange(metaRow, 1, 3, 2).setFontColor('#888888').setFontStyle('italic');
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -144,15 +145,13 @@ function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, bas
 // ─────────────────────────────────────────────────────────────────
 
 function insertLineChart_(sheet, dataRows, suffix) {
-  // Single contiguous range: header row (5) + all data rows.
-  // Google Sheets reliably uses row 5 (text) as series labels and
-  // col 1 (dates) as the X-axis domain with this layout.
-  var dataRange = sheet.getRange(5, 1, dataRows + 1, 4);
+  // Header is row 1, data rows 2..(dataRows+1) — total dataRows+1 rows.
+  var dataRange = sheet.getRange(1, 1, dataRows + 1, 4);
 
   var chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
     .addRange(dataRange)
-    .setPosition(dataRows + 8, 1, 0, 0)
+    .setPosition(dataRows + 5, 1, 0, 0)
     .setOption('title', 'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
     .setOption('titleTextStyle', { fontSize: 17, bold: true, color: '#202124' })
     .setOption('hAxis', {
