@@ -193,6 +193,46 @@ function debugChartSheet(suffix) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Standalone chart test — run directly from Apps Script editor.
+// Creates a fresh sheet "Test Chart" with 5 hardcoded rows and
+// builds the simplest possible LINE chart. No dependency on any
+// other function. If this is ALSO blank the issue is in the
+// spreadsheet/Apps Script environment itself, not our code.
+// ─────────────────────────────────────────────────────────────────
+
+function testMinimalChart() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Fresh sheet every time
+  var existing = ss.getSheetByName('Test Chart');
+  if (existing) ss.deleteSheet(existing);
+  var sheet = ss.insertSheet('Test Chart');
+
+  // Hardcoded 5-row dataset — no Date objects, just strings + numbers
+  sheet.getRange(1, 1, 6, 3).setValues([
+    ['Date',       'Series A', 'Series B'],
+    ['2026-01-01', 100,        100       ],
+    ['2026-01-02', 101,        99        ],
+    ['2026-01-03', 103,        98        ],
+    ['2026-01-04', 102,        101       ],
+    ['2026-01-05', 105,        103       ],
+  ]);
+
+  SpreadsheetApp.flush();
+
+  var chart = sheet.newChart()
+    .setChartType(Charts.ChartType.LINE)
+    .addRange(sheet.getRange(1, 1, 6, 3))
+    .setNumHeaders(1)
+    .setPosition(8, 1, 0, 0)
+    .build();
+
+  sheet.insertChart(chart);
+  ss.setActiveSheet(sheet);
+  ss.toast('Test chart created — do you see lines?', 'Chart Test', 10);
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────
 
