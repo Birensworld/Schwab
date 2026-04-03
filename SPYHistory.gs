@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.4 (2026-04-03) — Fix duplicate rows: use getDisplayValues() for last date + dedup guard.
+ * Version: 1.5 (2026-04-03) — Fix: initialize existingDates before if-block to avoid ReferenceError.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -59,6 +59,7 @@ function fetchSPYHistory() {
 
     // ── Determine fetch window and base prices ────────────────────
     var fetchStart, baseSPY, baseQQQ, fullRewrite;
+    var existingDates = {};   // populated in incremental mode for dedup guard
 
     if (lastRow > 1) {
       // Incremental: only fetch dates after the last row.
