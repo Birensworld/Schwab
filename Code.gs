@@ -13,17 +13,25 @@
 const ACCOUNT_CONFIGS = {
   '418': '52172418',
   '973': '55262973',
+  '317': '30050317',
 };
-const ACCOUNT_ORDER = ['418', '973'];   // col 2 = 418, col 3 = 973
+// Column order in Net Liquidity sheet:
+//   Col 1: Date | Col 2: 418 | Col 3: 973 | Col 4: 317 | Col 5: Total Net Liquidity
+const ACCOUNT_ORDER = ['418', '973', '317'];
 
 // Sheet name constants
 const SHEET_NET_LIQ  = 'Net Liquidity'; // single shared sheet, one col per account
 const SHEET_SPY      = 'SPY History';
 const HISTORY_START  = '2026-01-01';
 
-/** Returns the column index (1-based) for a given account suffix in the Net Liq sheet. */
+/** Returns the 1-based column index for a given account suffix in the Net Liq sheet. */
 function netLiqCol_(suffix) {
   return ACCOUNT_ORDER.indexOf(suffix) + 2;  // col 1 = Date, col 2+ = accounts
+}
+
+/** Returns the 1-based column index of the Total Net Liquidity column. */
+function totalNetLiqCol_() {
+  return ACCOUNT_ORDER.length + 2;  // one past the last account column
 }
 
 /** Returns the Equity Curve chart sheet name for an account. */
@@ -56,6 +64,10 @@ function onOpen() {
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_973')
       .addSeparator()
       .addItem('Build / Refresh Equity Curve Chart',     'buildEquityCurveChart_973'))
+    .addSubMenu(ui.createMenu('💼 Account …317')
+      .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_317')
+      .addSeparator()
+      .addItem('Build / Refresh Equity Curve Chart',     'buildEquityCurveChart_317'))
     .addSeparator()
     .addSubMenu(ui.createMenu('⏰ Automation')
       .addItem('Enable Daily Snapshot – All Accounts (4:30 PM ET)', 'setupDailyTrigger')
@@ -66,8 +78,10 @@ function onOpen() {
 // ─── Per-account menu wrappers ────────────────────────────────────
 function fetchTodayNetLiq_418()      { fetchTodayNetLiqForAccount('418'); }
 function fetchTodayNetLiq_973()      { fetchTodayNetLiqForAccount('973'); }
+function fetchTodayNetLiq_317()      { fetchTodayNetLiqForAccount('317'); }
 function buildEquityCurveChart_418() { buildEquityCurveChartForAccount('418'); }
 function buildEquityCurveChart_973() { buildEquityCurveChartForAccount('973'); }
+function buildEquityCurveChart_317() { buildEquityCurveChartForAccount('317'); }
 
 /**
  * Daily trigger target — captures Net Liq for every account,

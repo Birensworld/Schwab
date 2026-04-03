@@ -27,18 +27,19 @@ function getOrCreateNetLiqSheet_() {
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NET_LIQ);
 
-    // Build header row: Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
+    // Headers match the user's sheet exactly:
+    // Date | Net Liquidity 418 ($) | Net Liquidity 973 ($) | Net Liquidity 317 ($) | Total Net Liquidity
     var headers = ['Date'];
-    ACCOUNT_ORDER.forEach(function(s) { headers.push('Net Liq ' + s + ' ($)'); });
-    headers.push('Source');
+    ACCOUNT_ORDER.forEach(function(s) { headers.push('Net Liquidity ' + s + ' ($)'); });
+    headers.push('Total Net Liquidity');
 
     var hdrRange = sheet.getRange(1, 1, 1, headers.length);
     hdrRange.setValues([headers]);
     hdrRange.setFontWeight('bold').setBackground('#0b5394').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 120);
-    ACCOUNT_ORDER.forEach(function(_, i) { sheet.setColumnWidth(i + 2, 180); });
-    sheet.setColumnWidth(ACCOUNT_ORDER.length + 2, 110); // Source col
+    ACCOUNT_ORDER.forEach(function(_, i) { sheet.setColumnWidth(i + 2, 185); });
+    sheet.setColumnWidth(totalNetLiqCol_(), 160);
   }
   return sheet;
 }
@@ -172,14 +173,14 @@ function debugReconstruction() {
 /**
  * Appends a new date row or fills a single account cell.
  * NEVER deletes or clears any row.
+ * When a new row is appended, the Total column gets a SUM formula automatically.
  * @returns {boolean} true if a value was written, false if skipped
  */
 function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
-  var sheet  = getOrCreateNetLiqSheet_();
-  var tz     = Session.getScriptTimeZone();
-  var col    = netLiqCol_(suffix);       // 1-based column for this account
-  var srcCol = ACCOUNT_ORDER.length + 2; // Source is always the last column
-  var data   = sheet.getDataRange().getValues();
+  var sheet = getOrCreateNetLiqSheet_();
+  var tz    = Session.getScriptTimeZone();
+  var col   = netLiqCol_(suffix);   // 1-based column for this account
+  var data  = sheet.getDataRange().getValues();
 
   for (var i = 1; i < data.length; i++) {
     if (!data[i][0]) continue;
@@ -191,7 +192,6 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
     if (skipIfExists && hasValue) return false;  // preserve existing value
 
     sheet.getRange(i + 1, col).setValue(value);
-    sheet.getRange(i + 1, srcCol).setValue(source);
     return true;
   }
 
@@ -200,8 +200,16 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
   ACCOUNT_ORDER.forEach(function(s) {
     newRow.push(s === suffix ? value : '');
   });
-  newRow.push(source);
+  // Total Net Liquidity = SUM of all account columns
+  var lastAcctCol = String.fromCharCode(64 + ACCOUNT_ORDER.length + 1); // e.g. 'D' for 3 accounts
+  newRow.push('');  // placeholder so appendRow creates the cell
   sheet.appendRow(newRow);
+
+  // Set SUM formula in the Total column for the new row
+  var newRowNum  = sheet.getLastRow();
+  var totalFormula = '=SUM(B' + newRowNum + ':' + lastAcctCol + newRowNum + ')';
+  sheet.getRange(newRowNum, totalNetLiqCol_()).setFormula(totalFormula);
+
   return true;
 }
 
