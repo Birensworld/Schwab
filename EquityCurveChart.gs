@@ -146,41 +146,14 @@ function writeChartData_(sheet, rows, suffix, baseDate, baseNetLiq, baseSPY, bas
 // ─────────────────────────────────────────────────────────────────
 
 function insertLineChart_(sheet, dataRows, suffix) {
-  // Single contiguous range: col A = domain (string dates as categories),
-  // cols B-D = three series. setNumHeaders(1) = row 1 is labels.
+  // Bare-minimum chart — no styling options — to confirm data renders.
+  // If this shows lines, options will be added back one by one.
   var n = dataRows + 1; // header row + data rows
   var chart = sheet.newChart()
     .setChartType(Charts.ChartType.LINE)
     .addRange(sheet.getRange(1, 1, n, 4))
     .setNumHeaders(1)
     .setPosition(dataRows + 5, 1, 0, 0)
-    .setOption('title', 'Equity Curve — Account …' + suffix + ' vs. SPY & QQQ')
-    .setOption('titleTextStyle', { fontSize: 17, bold: true, color: '#202124' })
-    .setOption('hAxis', {
-      title: 'Date',
-      titleTextStyle: { bold: true, color: '#444' },
-      slantedText: true, slantedTextAngle: 30,
-      format: 'MMM yyyy',
-      gridlines: { color: '#e0e0e0' },
-    })
-    .setOption('vAxis', {
-      title: 'Indexed Value (Base = 100)',
-      titleTextStyle: { bold: true, color: '#444' },
-      gridlines: { count: 10, color: '#e0e0e0' },
-      format: '0',
-    })
-    .setOption('series', {
-      0: { color: '#1a73e8', lineWidth: 2, pointSize: 0 },  // Portfolio — blue
-      1: { color: '#ea4335', lineWidth: 2, pointSize: 0 },  // SPY — red
-      2: { color: '#fbbc04', lineWidth: 2, pointSize: 0 },  // QQQ — amber
-    })
-    .setOption('legend',      { position: 'top', textStyle: { fontSize: 13 } })
-    .setOption('width',        1200)
-    .setOption('height',       550)
-    .setOption('backgroundColor', { fill: '#ffffff' })
-    .setOption('chartArea',   { left: 80, top: 80, width: '87%', height: '72%' })
-    .setOption('interpolateNulls', true)
-    .setOption('focusTarget', 'category')
     .build();
 
   sheet.insertChart(chart);
