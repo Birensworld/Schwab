@@ -1,5 +1,7 @@
 /**
  * EquityCurveChart.gs — Builds a per-account equity curve chart.
+ * Version: 1.5 (2026-04-03) — Fix: delete+recreate sheet to clear old embedded
+ *           charts that caused blank rendering; bare-minimum chart config.
  *
  * Each chart plots three series indexed to 100 at the first date where
  * all three have data:
