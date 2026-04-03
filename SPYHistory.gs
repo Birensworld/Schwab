@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.6 (2026-04-03) — Fix: parse lastDateStr as local midnight for correct nextDay calculation.
+ * Version: 1.7 (2026-04-03) — Fix: use getValues()+fmtDate_() for date reads so format matches API dates.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -70,19 +70,17 @@ function fetchSPYHistory() {
       baseSPY = firstRow[1];          // SPY Close ($)
       baseQQQ = firstRow[3] || null;  // QQQ Close ($)
 
-      // Use getDisplayValues() to read the last date as the string shown in the
-      // cell (e.g. '2026-04-02'). This avoids timezone shift issues that occur
-      // when converting a stored Date serial back through fmtDate_().
-      const lastDateStr = sheet.getRange(lastRow, 1).getDisplayValue(); // 'yyyy-mm-dd'
-
-      // Build a set of all dates already in the sheet for the dedup guard below
+      // Read all existing date values and format them consistently as
+      // 'yyyy-MM-dd' using fmtDate_() — same format the API returns.
+      // This ensures existingDates keys and lastDateStr always match
+      // API dates regardless of how the cell display format is set.
+      const allDateVals = sheet.getRange(2, 1, dataRows, 1).getValues();
       const existingDates = {};
-      sheet.getRange(2, 1, dataRows, 1).getDisplayValues().forEach(function(r) {
-        if (r[0]) existingDates[r[0]] = true;
+      allDateVals.forEach(function(r) {
+        if (r[0] instanceof Date) existingDates[fmtDate_(r[0], tz)] = true;
       });
 
-      // Parse lastDateStr ('yyyy-mm-dd') as LOCAL midnight to avoid UTC
-      // timezone shift in setDate()+1 calculation.
+      const lastDateStr = fmtDate_(allDateVals[allDateVals.length - 1][0], tz);
       var lp = lastDateStr.split('-');
       var nextDay = new Date(+lp[0], +lp[1] - 1, +lp[2] + 1);
       fetchStart  = fmtDate_(nextDay, tz);
