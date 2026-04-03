@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.2 (2026-04-03) — Incremental fetch: only pulls new dates, appends rows.
+ * Version: 1.3 (2026-04-03) — Fix: write dates as local midnight to avoid timezone shift causing duplicate rows.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
@@ -112,8 +112,13 @@ function fetchSPYHistory() {
     const newRows = newDates.map(function(d) {
       const spyClose = spyMap[d];
       const qqqClose = qqqMap[d] || '';
+      // Parse as LOCAL midnight so reading back with fmtDate_() always
+      // returns the same YYYY-MM-DD regardless of the script timezone.
+      // new Date('YYYY-MM-DD') is UTC midnight and shifts to previous day in US timezones.
+      var p = d.split('-');
+      var localDate = new Date(+p[0], +p[1] - 1, +p[2]);
       return [
-        new Date(d),
+        localDate,
         spyClose,
         roundTo2_(spyClose / baseSPY * 100),
         qqqClose,
