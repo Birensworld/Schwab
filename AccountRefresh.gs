@@ -1,9 +1,9 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.0 (2026-04-03)
+ * Version: 1.2 (2026-04-03)
  *
  * Writes to the "Schwab" sheet:
- *   - One header row per account (label, value, cash, cash %)
+ *   - One header row per account 
  *   - Position rows (symbol, qty, chg%, avg price, MV, P/L, P/L %, weight)
  *   - Totals row at the bottom (sum of all accounts)
  *
@@ -50,12 +50,14 @@ function UpdateSheet() {
     const acctLabel = getAccountLabel(acctId);
     const acctValue = balances.liquidationValue || 0;
     const cash      = balances.cashBalance || 0;
+    const ytdPL = getYtdPLPercent_(acctId, acctValue);
     allAccounts.push({
       accountId:   acctId,
       label:       acctLabel,
       value:       acctValue,
       cash:        cash,
-      cashPercent: acctValue ? (cash / acctValue) : 0,
+      allocPercent: (acctValue - cash) / acctValue,
+      ytdPL:       ytdPL,
       order:       accountOrderMap[acctLabel] || 999,
       positions:   account.positions || []
     });
@@ -66,12 +68,61 @@ function UpdateSheet() {
   // ── Write each account block ──────────────────────────────────
   allAccounts.forEach(acct => {
     // Account header row
-    const accountRange = sheet.getRange(rowIndex, 1, 1, 4);
-    accountRange.setValues([[acct.label, acct.value, acct.cash, acct.cashPercent]]);
+    const accountRange = sheet.getRange(rowIndex, 1, 1, 8);
+    accountRange.setValues([[
+  acct.label,
+  acct.value,
+  acct.cash,
+  "",
+  "ALLOC:",
+  acct.allocPercent,
+  "YTD P/L:",
+  acct.ytdPL
+  ]]);
     accountRange.setFontWeight("bold");
     sheet.getRange(rowIndex, 1).setBackground("#d9d9d9").setFontSize(12);
-    sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat("#,##0.00").setBackground("#d0f0c0");
-    sheet.getRange(rowIndex, 4).setNumberFormat("0.00%").setBackground("#d0f0c0");
+    sheet.getRange(rowIndex, 2, 1, 8).setBackground("#d0f0c0"); //Green
+    sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat("#,##0.00");
+    sheet.getRange(rowIndex, 6).setNumberFormat("0.00%");
+    sheet.getRange(rowIndex, 8).setNumberFormat("0.00%");
+
+    // 🔹 Conditional formatting for YTD P/L (Column H)
+const ytdCell = sheet.getRange(rowIndex, 8);
+
+const rules = sheet.getConditionalFormatRules();
+
+// Positive → Dark Green
+rules.push(
+  SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setFontColor("#006400") // dark green
+    .setBold(true)
+    .setRanges([ytdCell])
+    .build()
+);
+
+// Negative → Red
+rules.push(
+  SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberLessThan(0)
+    .setFontColor("red")
+    .setBold(true)
+    .setRanges([ytdCell])
+    .build()
+);
+
+// Zero → Black
+rules.push(
+  SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberEqualTo(0)
+    .setFontColor("black")
+    .setBold(true)
+    .setRanges([ytdCell])
+    .build()
+);
+
+    sheet.setConditionalFormatRules(rules);
+    
     rowIndex++;
 
     // Position header row
@@ -179,4 +230,66 @@ function getAccountLabel(acctId) {
     case "52172418": return "SW Equity";
     default:         return "SW IRA";
   }
+}
+
+function getAccountSuffix_(acctId) {
+  return String(acctId || "").slice(-3);
+}
+
+function getStartOfYearNetLiq_(suffix) {
+  const map = getNetLiqMap_(suffix);
+  if (!map || Object.keys(map).length === 0) {
+    console.log("[YTD DEBUG] No NetLiq data for suffix " + suffix);
+    return null;
+  }
+
+  const currentYear = String(new Date().getFullYear());
+  let earliestDateStr = null;
+  let earliestValue = null;
+
+  Object.keys(map).forEach(dateStr => {
+    dateStr = String(dateStr).trim();
+
+    // Expect plain YYYY-MM-DD strings only
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    if (!dateStr.startsWith(currentYear + "-")) return;
+
+    const v = Number(map[dateStr]);
+    if (!isFinite(v) || v <= 0) return;
+
+    // Lexicographic comparison works for YYYY-MM-DD
+    if (!earliestDateStr || dateStr < earliestDateStr) {
+      earliestDateStr = dateStr;
+      earliestValue = v;
+    }
+  });
+
+  console.log(
+    "[YTD DEBUG] Suffix: " + suffix +
+    " | StartDate: " + earliestDateStr +
+    " | StartValue: " + earliestValue
+  );
+
+  return earliestValue;
+}
+
+function getYtdPLPercent_(acctId, acctValue) {
+  if (!acctValue) return 0;
+
+  const suffix = getAccountSuffix_(acctId);
+  const startValue = getStartOfYearNetLiq_(suffix);
+
+  const ytd = (!startValue || startValue <= 0)
+    ? 0
+    : (acctValue - startValue) / startValue;
+
+  console.log(
+    "[YTD DEBUG] Account: " + acctId +
+    " | Suffix: " + suffix +
+    " | StartValue: " + startValue +
+    " | CurrentValue: " + acctValue +
+    " | YTD%: " + ytd
+  );
+
+  return ytd;
 }
