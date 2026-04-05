@@ -1,6 +1,6 @@
 /**
  * EquityCurveChart.gs — Builds a per-account equity curve chart.
- * Version: 2.0 (2026-04-05) — % change from day 1; month-end labeled dots.
+ * Version: 2.1 (2026-04-05) — HISTORY_START base anchor; black NL, green SPY; 0.5% gridlines; bold axis labels.
  *
  * Chart sheet layout (7 columns):
  *   Date | NL% | SPY% | QQQ% | NL dot | SPY dot | QQQ dot
@@ -49,11 +49,20 @@ function buildEquityCurveChartForAccount(suffix) {
       );
     }
 
-    // ── 3. Compute % change from first common date ────────────────
-    var baseDate   = commonDates[0];
-    var baseNetLiq = netLiqMap[baseDate];
-    var baseSPY    = spyMap[baseDate];
-    var baseQQQ    = qqqMap[baseDate] || null;
+    // ── 3. Base values anchored to HISTORY_START ──────────────────
+    // Each series uses the first available date on or after HISTORY_START
+    // as its own base. This handles holidays (e.g. Jan 1) where NetLiq
+    // may have a manual entry but SPY has no trading data.
+    var allNLDates  = Object.keys(netLiqMap).sort();
+    var allSPYDates = Object.keys(spyMap).sort();
+
+    var baseNLDate  = allNLDates.find(function(d)  { return d >= HISTORY_START; }) || allNLDates[0];
+    var baseSPYDate = allSPYDates.find(function(d) { return d >= HISTORY_START; }) || allSPYDates[0];
+
+    var baseDate   = baseNLDate;
+    var baseNetLiq = netLiqMap[baseNLDate];
+    var baseSPY    = spyMap[baseSPYDate];
+    var baseQQQ    = qqqMap[baseSPYDate] || null;
 
     var monthEnds = getMonthEndDates_(commonDates);
 
@@ -167,8 +176,10 @@ function insertLineChart_(sheet, rows, suffix) {
   var dataMin = allPcts.length ? Math.min.apply(null, allPcts) : -5;
   var dataMax = allPcts.length ? Math.max.apply(null, allPcts) : 20;
   var padding = Math.max((dataMax - dataMin) * 0.15, 2);
-  var yMin    = Math.floor(dataMin - padding);
-  var yMax    = Math.ceil(dataMax  + padding);
+  // Round to nearest 0.5 so gridlines land exactly on 0.5 increments
+  var yMin    = Math.floor((dataMin - padding) * 2) / 2;
+  var yMax    = Math.ceil((dataMax  + padding) * 2) / 2;
+  var gridlineCount = Math.round((yMax - yMin) / 0.5) + 1;
 
   // ── Build chart ───────────────────────────────────────────────
   // IMPORTANT: flat dot-notation only — nested setOption() objects
@@ -186,28 +197,32 @@ function insertLineChart_(sheet, rows, suffix) {
     .setOption('hAxis.slantedText', true)
     .setOption('hAxis.slantedTextAngle', 30)
     .setOption('vAxis.title', '% Return')
-    .setOption('vAxis.viewWindowMode', 'explicit')
-    .setOption('vAxis.viewWindow.min', yMin)
-    .setOption('vAxis.viewWindow.max', yMax)
-    .setOption('vAxis.format', '0.0')
+    .setOption('vAxis.viewWindowMode',       'explicit')
+    .setOption('vAxis.viewWindow.min',       yMin)
+    .setOption('vAxis.viewWindow.max',       yMax)
+    .setOption('vAxis.format',               '0.0')
+    .setOption('vAxis.gridlines.count',      gridlineCount)
+    .setOption('vAxis.titleTextStyle.bold',  true)
+    .setOption('hAxis.titleTextStyle.bold',  true)
     // ── Series 0–2: solid lines ───────────────────────────────
-    .setOption('series.0.color',         '#1a73e8')
+    // NL = black, SPY = green, QQQ = gold
+    .setOption('series.0.color',         '#000000')
     .setOption('series.0.lineWidth',     2)
     .setOption('series.0.pointsVisible', false)
-    .setOption('series.1.color',         '#ea4335')
+    .setOption('series.1.color',         '#34a853')
     .setOption('series.1.lineWidth',     2)
     .setOption('series.1.pointsVisible', false)
     .setOption('series.2.color',         '#fbbc04')
     .setOption('series.2.lineWidth',     2)
     .setOption('series.2.pointsVisible', false)
     // ── Series 3–5: month-end dots + value labels ─────────────
-    .setOption('series.3.color',            '#1a73e8')
+    .setOption('series.3.color',            '#000000')
     .setOption('series.3.lineWidth',        0)
     .setOption('series.3.pointsVisible',    true)
     .setOption('series.3.pointSize',        7)
     .setOption('series.3.dataLabel',        'value')
     .setOption('series.3.visibleInLegend',  false)
-    .setOption('series.4.color',            '#ea4335')
+    .setOption('series.4.color',            '#34a853')
     .setOption('series.4.lineWidth',        0)
     .setOption('series.4.pointsVisible',    true)
     .setOption('series.4.pointSize',        7)
