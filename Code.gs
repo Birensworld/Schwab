@@ -1,6 +1,6 @@
 /**
  * Code.gs — Schwab Portfolio + Equity Curve — Google Apps Script
- * Version: 2.2 (2026-04-03)
+ * Version: 2.3 (2026-04-05)
  *
  * Entry point: onOpen() builds all menus.
  * Functionality is split across separate files:
@@ -9,7 +9,7 @@
  *   Liquidation.gs     — Position liquidation
  *   NetLiquidity.gs    — Net Liquidity sheet management
  *   SPYHistory.gs      — SPY + QQQ price history
- *   EquityCurveChart.gs — Indexed equity curve charts
+ *   EquityCurveChart.gs — % change equity curve with month-end labels
  *   SchwabAPI.gs       — Low-level Schwab API wrappers
  *   Backup.gs          — Backup to SPY_NetLiq_Backup spreadsheet
  *   Triggers.gs        — Daily trigger setup / teardown
