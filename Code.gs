@@ -1,6 +1,6 @@
 /**
  * Code.gs — Schwab Portfolio + Equity Curve — Google Apps Script
- * Version: 2.3 (2026-04-05)
+ * Version: 2.4 (2026-04-05)
  *
  * Entry point: onOpen() builds all menus.
  * Functionality is split across separate files:
@@ -59,15 +59,18 @@ function onOpen() {
     .addSubMenu(ui.createMenu('💼 Account …418')
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_418')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_418'))
+      .addItem('📈 Build / Refresh Equity Curve Chart', 'buildEquityCurveChart_418')
+      .addItem('📅 Build Chart – By Year',              'buildEquityCurveChartYearly_418'))
     .addSubMenu(ui.createMenu('💼 Account …973')
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_973')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_973'))
+      .addItem('📈 Build / Refresh Equity Curve Chart', 'buildEquityCurveChart_973')
+      .addItem('📅 Build Chart – By Year',              'buildEquityCurveChartYearly_973'))
     .addSubMenu(ui.createMenu('💼 Account …317')
       .addItem("Capture Today's Net Liquidity (skip if exists)", 'fetchTodayNetLiq_317')
       .addSeparator()
-      .addItem('Build / Refresh Equity Curve Chart',  'buildEquityCurveChart_317'))
+      .addItem('📈 Build / Refresh Equity Curve Chart', 'buildEquityCurveChart_317')
+      .addItem('📅 Build Chart – By Year',              'buildEquityCurveChartYearly_317'))
     .addSeparator()
     .addSubMenu(ui.createMenu('⏰ Automation')
       .addItem('Enable Daily Snapshot – All Accounts (4:30 PM ET)', 'setupDailyTrigger')
@@ -79,9 +82,12 @@ function onOpen() {
 function fetchTodayNetLiq_418()       { fetchTodayNetLiqForAccount('418'); }
 function fetchTodayNetLiq_973()       { fetchTodayNetLiqForAccount('973'); }
 function fetchTodayNetLiq_317()       { fetchTodayNetLiqForAccount('317'); }
-function buildEquityCurveChart_418()  { buildEquityCurveChartForAccount('418'); }
-function buildEquityCurveChart_973()  { buildEquityCurveChartForAccount('973'); }
-function buildEquityCurveChart_317()  { buildEquityCurveChartForAccount('317'); }
+function buildEquityCurveChart_418()         { buildEquityCurveChartForAccount('418'); }
+function buildEquityCurveChart_973()         { buildEquityCurveChartForAccount('973'); }
+function buildEquityCurveChart_317()         { buildEquityCurveChartForAccount('317'); }
+function buildEquityCurveChartYearly_418()   { promptAndBuildYearlyEquityCurve_('418'); }
+function buildEquityCurveChartYearly_973()   { promptAndBuildYearlyEquityCurve_('973'); }
+function buildEquityCurveChartYearly_317()   { promptAndBuildYearlyEquityCurve_('317'); }
 
 // ─── Batch helpers ────────────────────────────────────────────────
 
