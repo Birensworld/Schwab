@@ -1,6 +1,6 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.2 (2026-04-03)
+ * Version: 1.3 (2026-04-03)
  *
  * Writes to the "Schwab" sheet:
  *   - One header row per account 
@@ -205,13 +205,73 @@ rules.push(
   });
 
   // ── Totals row ────────────────────────────────────────────────
-  const totalValue = allAccounts.reduce((s, a) => s + a.value, 0);
-  const totalCash  = allAccounts.reduce((s, a) => s + a.cash,  0);
-  const totalsRange = sheet.getRange(rowIndex, 1, 1, 4);
-  totalsRange.setValues([["TOTALS", totalValue, totalCash, totalValue ? (totalCash / totalValue) : 0]]);
-  totalsRange.setFontWeight("bold").setFontSize(11).setBackground("#d0f0c0");
-  sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat("#,##0.00");
-  sheet.getRange(rowIndex, 4).setNumberFormat("0.00%");
+const totalValue = allAccounts.reduce((s, a) => s + a.value, 0);
+const totalCash = allAccounts.reduce((s, a) => s + a.cash, 0);
+const totalAlloc = totalValue ? ((totalValue - totalCash) / totalValue) : 0;
+
+// Total YTD based on summed starting values across accounts
+const totalStartValue = allAccounts.reduce((s, a) => {
+  const suffix = getAccountSuffix_(a.accountId);
+  const startValue = getStartOfYearNetLiq_(suffix);
+  return s + (startValue || 0);
+}, 0);
+
+const totalYtdPL = totalStartValue > 0
+  ? (totalValue - totalStartValue) / totalStartValue
+  : 0;
+
+const totalsRange = sheet.getRange(rowIndex, 1, 1, 8);
+totalsRange.setValues([[
+  "TOTALS",
+  totalValue,
+  totalCash,
+  "",
+  "ALLOC:",
+  totalAlloc,
+  "YTD P/L:",
+  totalYtdPL
+]]);
+
+totalsRange.setFontWeight("bold").setFontSize(11);
+sheet.getRange(rowIndex, 1).setBackground("#d9d9d9");
+sheet.getRange(rowIndex, 2, 1, 8).setBackground("#d0f0c0");
+sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat("#,##0.00");
+sheet.getRange(rowIndex, 6).setNumberFormat("0.00%");
+sheet.getRange(rowIndex, 8).setNumberFormat("0.00%");
+
+// Totals row YTD color formatting
+const totalYtdCell = sheet.getRange(rowIndex, 8);
+const rules = sheet.getConditionalFormatRules();
+
+rules.push(
+  SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setFontColor("#006400")
+    .setBold(true)
+    .setRanges([totalYtdCell])
+    .build()
+);
+
+rules.push(
+  SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberLessThan(0)
+    .setFontColor("red")
+    .setBold(true)
+    .setRanges([totalYtdCell])
+    .build()
+);
+
+rules.push(
+  SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberEqualTo(0)
+    .setFontColor("black")
+    .setBold(true)
+    .setRanges([totalYtdCell])
+    .build()
+);
+
+sheet.setConditionalFormatRules(rules);
+
 }
 
 // ─────────────────────────────────────────────────────────────────
