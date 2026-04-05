@@ -1,12 +1,19 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 1.9 (2026-04-03) — Handle legacy Date-object rows alongside new plain-string rows.
+ * Version: 2.0 (2026-04-05) — Drop Indexed columns; actual close prices only.
  *
  * Sheet layout (SHEET_SPY):
- *   Date | SPY Close ($) | SPY Indexed (Base=100) | QQQ Close ($) | QQQ Indexed (Base=100)
+ *   Date | SPY Close ($) | QQQ Close ($)
  *
  * Dates are stored as plain text strings ('2026-01-02'), not Date objects.
  * This eliminates all timezone conversion issues entirely.
+ *
+ * ╔══════════════════════════════════════════════════════════════╗
+ * ║  DATA SAFETY GUARANTEE                                       ║
+ * ║  Actual close price columns (SPY, QQQ) are NEVER deleted     ║
+ * ║  or overwritten. The migration only removes the two          ║
+ * ║  "Indexed (Base=100)" columns that are no longer needed.     ║
+ * ╚══════════════════════════════════════════════════════════════╝
  */
 
 // ─────────────────────────────────────────────────────────────────
@@ -18,18 +25,39 @@ function getOrCreateSPYSheet_() {
   let sheet = ss.getSheetByName(SHEET_SPY);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_SPY);
-    const hdr = sheet.getRange(1, 1, 1, 5);
-    hdr.setValues([[
-      'Date',
-      'SPY Close ($)', 'SPY Indexed (Base=100)',
-      'QQQ Close ($)', 'QQQ Indexed (Base=100)',
-    ]]);
+    const hdr = sheet.getRange(1, 1, 1, 3);
+    hdr.setValues([['Date', 'SPY Close ($)', 'QQQ Close ($)']]);
     hdr.setFontWeight('bold').setBackground('#cc0000').setFontColor('#ffffff');
     sheet.setFrozenRows(1);
     sheet.setColumnWidth(1, 120);
-    [2, 3, 4, 5].forEach(function(c) { sheet.setColumnWidth(c, 160); });
+    [2, 3].forEach(function(c) { sheet.setColumnWidth(c, 140); });
+  } else {
+    migrateSPYHistoryColumns_(sheet);
   }
   return sheet;
+}
+
+/**
+ * One-time migration: removes the two "Indexed (Base=100)" columns from the
+ * old 5-column layout, leaving only Date | SPY Close ($) | QQQ Close ($).
+ *
+ * Actual close price values are NEVER touched — only the derived index
+ * columns (cols 3 and 5 in the old layout) are deleted.
+ * Safe to call repeatedly; exits immediately if already migrated.
+ */
+function migrateSPYHistoryColumns_(sheet) {
+  if (sheet.getLastColumn() < 5) return;  // already migrated
+
+  // Delete higher-index column first so lower-index position is unaffected
+  sheet.deleteColumn(5);  // QQQ Indexed (Base=100)
+  sheet.deleteColumn(3);  // SPY Indexed (Base=100)
+
+  // Refresh header labels
+  var hdr = sheet.getRange(1, 1, 1, 3);
+  hdr.setValues([['Date', 'SPY Close ($)', 'QQQ Close ($)']]);
+  hdr.setFontWeight('bold').setBackground('#cc0000').setFontColor('#ffffff');
+  sheet.setColumnWidth(2, 140);
+  sheet.setColumnWidth(3, 140);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -61,11 +89,11 @@ function fetchSPYHistory() {
     const lastRow = sheet.getLastRow();
 
     // ── Determine fetch window ────────────────────────────────────
-    var fetchStart, baseSPY, baseQQQ, fullRewrite;
+    var fetchStart, fullRewrite;
 
     if (lastRow > 1) {
       // Read all existing dates — handle both legacy Date objects and new plain strings
-      const allRows    = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      const allRows    = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
       const existingDates = {};
       function toDateStr_(v) {
         if (!v) return null;
@@ -77,9 +105,7 @@ function fetchSPYHistory() {
         if (s) existingDates[s] = true;
       });
 
-      // Base prices from first data row
-      baseSPY = allRows[0][1];
-      baseQQQ = allRows[0][3] || null;
+      // Base prices no longer needed (% change computed at chart-build time)
 
       // Last date — convert to string if needed, then add 1 day
       const lastDate = toDateStr_(allRows[allRows.length - 1][0]);
@@ -114,23 +140,16 @@ function fetchSPYHistory() {
       }
 
       const newRows = datesToWrite.map(function(d) {
-        const spyClose = spyMap[d];
-        const qqqClose = qqqMap[d] || '';
         return [
-          d,                                                              // plain string date
-          spyClose,
-          roundTo2_(spyClose / baseSPY * 100),
-          qqqClose,
-          qqqClose && baseQQQ ? roundTo2_(qqqClose / baseQQQ * 100) : '',
+          d,                // plain string date
+          spyMap[d],
+          qqqMap[d] || '',
         ];
       });
 
       const startRow = sheet.getLastRow() + 1;
-      sheet.getRange(startRow, 1, newRows.length, 5).setValues(newRows);
-      sheet.getRange(startRow, 2, newRows.length, 1).setNumberFormat('"$"#,##0.00');
-      sheet.getRange(startRow, 3, newRows.length, 1).setNumberFormat('0.00');
-      sheet.getRange(startRow, 4, newRows.length, 1).setNumberFormat('"$"#,##0.00');
-      sheet.getRange(startRow, 5, newRows.length, 1).setNumberFormat('0.00');
+      sheet.getRange(startRow, 1, newRows.length, 3).setValues(newRows);
+      sheet.getRange(startRow, 2, newRows.length, 2).setNumberFormat('"$"#,##0.00');
 
       backupSPYHistory_();
       ss.toast('✅ Added ' + newRows.length + ' new day(s) — SPY & QQQ', 'Benchmarks Updated', 10);
@@ -150,28 +169,18 @@ function fetchSPYHistory() {
       qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
 
       const allDates = Object.keys(spyMap).sort();
-      const baseDate = allDates.find(function(d) { return d >= HISTORY_START; }) || allDates[0];
-      baseSPY = spyMap[baseDate];
-      baseQQQ = qqqMap[baseDate] || null;
 
       const rows = allDates.map(function(d) {
-        const spyClose = spyMap[d];
-        const qqqClose = qqqMap[d] || '';
         return [
-          d,                                                              // plain string date
-          spyClose,
-          roundTo2_(spyClose / baseSPY * 100),
-          qqqClose,
-          qqqClose && baseQQQ ? roundTo2_(qqqClose / baseQQQ * 100) : '',
+          d,                // plain string date
+          spyMap[d],
+          qqqMap[d] || '',
         ];
       });
 
       if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-      sheet.getRange(2, 1, rows.length, 5).setValues(rows);
-      sheet.getRange(2, 2, rows.length, 1).setNumberFormat('"$"#,##0.00');
-      sheet.getRange(2, 3, rows.length, 1).setNumberFormat('0.00');
-      sheet.getRange(2, 4, rows.length, 1).setNumberFormat('"$"#,##0.00');
-      sheet.getRange(2, 5, rows.length, 1).setNumberFormat('0.00');
+      sheet.getRange(2, 1, rows.length, 3).setValues(rows);
+      sheet.getRange(2, 2, rows.length, 2).setNumberFormat('"$"#,##0.00');
 
       backupSPYHistory_();
       ss.toast(
@@ -241,7 +250,7 @@ function getBenchmarkCloseMaps_() {
     var d = row[0];                          // already a 'yyyy-MM-dd' string
     if (typeof d !== 'string') return;       // skip any legacy Date-object rows
     spy[d] = parseFloat(row[1]) || 0;
-    if (row[3]) qqq[d] = parseFloat(row[3]) || 0;
+    if (row[2]) qqq[d] = parseFloat(row[2]) || 0;
   });
 
   return { spy: spy, qqq: qqq };
