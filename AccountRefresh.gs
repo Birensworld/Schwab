@@ -1,6 +1,6 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.3 (2026-04-03)
+ * Version: 1.4 (2026-04-06)
  *
  * Writes to the "Schwab" sheet:
  *   - One header row per account 
@@ -65,6 +65,20 @@ function UpdateSheet() {
 
   allAccounts.sort((a, b) => a.order - b.order);
 
+  // ── Fetch live quotes for all position symbols (one API call) ────
+  const allSymbols = [];
+  allAccounts.forEach(acct => {
+    acct.positions
+      .filter(pos => ["EQUITY","ETF","MUTUAL_FUND","COLLECTIVE_INVESTMENT"].includes(pos.instrument?.assetType))
+      .forEach(pos => { if (pos.instrument?.symbol) allSymbols.push(pos.instrument.symbol); });
+  });
+  let quoteChangePcts = {};
+  try {
+    quoteChangePcts = getQuoteChangePcts_([...new Set(allSymbols)]);
+  } catch (e) {
+    console.warn('Quote fetch failed — Chg % will be blank: ' + e.message);
+  }
+
   // ── Write each account block ──────────────────────────────────
   allAccounts.forEach(acct => {
     // Account header row
@@ -86,43 +100,17 @@ function UpdateSheet() {
     sheet.getRange(rowIndex, 6).setNumberFormat("0.00%");
     sheet.getRange(rowIndex, 8).setNumberFormat("0.00%");
 
-    // 🔹 Conditional formatting for YTD P/L (Column H)
-const ytdCell = sheet.getRange(rowIndex, 8);
-
-const rules = sheet.getConditionalFormatRules();
-
-// Positive → Dark Green
-rules.push(
-  SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberGreaterThan(0)
-    .setFontColor("#006400") // dark green
-    .setBold(true)
-    .setRanges([ytdCell])
-    .build()
-);
-
-// Negative → Red
-rules.push(
-  SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberLessThan(0)
-    .setFontColor("red")
-    .setBold(true)
-    .setRanges([ytdCell])
-    .build()
-);
-
-// Zero → Black
-rules.push(
-  SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberEqualTo(0)
-    .setFontColor("black")
-    .setBold(true)
-    .setRanges([ytdCell])
-    .build()
-);
-
+    // Conditional formatting for YTD P/L (Column H)
+    const ytdCell = sheet.getRange(rowIndex, 8);
+    const rules = sheet.getConditionalFormatRules();
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThan(0).setFontColor("#006400").setBold(true).setRanges([ytdCell]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberLessThan(0).setFontColor("red").setBold(true).setRanges([ytdCell]).build());
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberEqualTo(0).setFontColor("black").setBold(true).setRanges([ytdCell]).build());
     sheet.setConditionalFormatRules(rules);
-    
+
     rowIndex++;
 
     // Position header row
@@ -138,13 +126,15 @@ rules.push(
 
     if (positions.length > 0) {
       const posRows = positions.map(pos => {
+        const sym      = pos.instrument?.symbol || "";
         const qty      = (pos.longQuantity || 0) - (pos.shortQuantity || 0);
         const avgPrice = pos.averagePrice || 0;
         const mv       = pos.marketValue || 0;
         const openPL   = pos.longOpenProfitLoss || 0;
+        const chgPct   = (sym in quoteChangePcts) ? quoteChangePcts[sym] : "";
         return [
-          pos.instrument?.symbol || "",
-          qty, "",           // Chg % filled by GOOGLEFINANCE formula below
+          sym,
+          qty, chgPct,
           avgPrice, mv, openPL,
           (avgPrice && qty) ? (openPL / (avgPrice * qty)) : 0,
           acct.value ? (mv / acct.value) : 0
@@ -157,17 +147,13 @@ rules.push(
       // Column formatting
       sheet.getRange(rowIndex, 1, posRows.length, 1).setFontWeight("bold");
       sheet.getRange(rowIndex, 2, posRows.length, 1).setNumberFormat("#,##0").setFontWeight("bold");
+      sheet.getRange(rowIndex, 3, posRows.length, 1).setNumberFormat("0.00%").setFontWeight("bold");
       sheet.getRange(rowIndex, 4, posRows.length, 3).setNumberFormat("#,##0.00");
       sheet.getRange(rowIndex, 5, posRows.length, 1).setFontWeight("bold");
       sheet.getRange(rowIndex, 7, posRows.length, 1).setNumberFormat("0.00%").setFontWeight("bold");
       sheet.getRange(rowIndex, 8, posRows.length, 1).setNumberFormat("0.00%").setFontWeight("bold");
       sheet.getRange(rowIndex, 9, posRows.length, 1)
         .setFontColor("#666666").setFontSize(9).setBackground("#f5f5f5");
-
-      // GOOGLEFINANCE formulas for Chg % column
-      sheet.getRange(rowIndex, 3, positions.length, 1).setFormulas(
-        positions.map(pos =>
-          [`=IFERROR(GOOGLEFINANCE("${pos.instrument?.symbol}", "changepct")/100, 0)`]));
 
       // Hidden account ID in column I (used by Liquidation.gs)
       sheet.getRange(rowIndex, 9, posRows.length, 1)
@@ -205,73 +191,38 @@ rules.push(
   });
 
   // ── Totals row ────────────────────────────────────────────────
-const totalValue = allAccounts.reduce((s, a) => s + a.value, 0);
-const totalCash = allAccounts.reduce((s, a) => s + a.cash, 0);
-const totalAlloc = totalValue ? ((totalValue - totalCash) / totalValue) : 0;
+  const totalValue = allAccounts.reduce((s, a) => s + a.value, 0);
+  const totalCash  = allAccounts.reduce((s, a) => s + a.cash,  0);
+  const totalAlloc = totalValue ? ((totalValue - totalCash) / totalValue) : 0;
 
-// Total YTD based on summed starting values across accounts
-const totalStartValue = allAccounts.reduce((s, a) => {
-  const suffix = getAccountSuffix_(a.accountId);
-  const startValue = getStartOfYearNetLiq_(suffix);
-  return s + (startValue || 0);
-}, 0);
+  const totalStartValue = allAccounts.reduce((s, a) => {
+    const suffix = getAccountSuffix_(a.accountId);
+    const startValue = getStartOfYearNetLiq_(suffix);
+    return s + (startValue || 0);
+  }, 0);
 
-const totalYtdPL = totalStartValue > 0
-  ? (totalValue - totalStartValue) / totalStartValue
-  : 0;
+  const totalYtdPL = totalStartValue > 0
+    ? (totalValue - totalStartValue) / totalStartValue
+    : 0;
 
-const totalsRange = sheet.getRange(rowIndex, 1, 1, 8);
-totalsRange.setValues([[
-  "TOTALS",
-  totalValue,
-  totalCash,
-  "",
-  "ALLOC:",
-  totalAlloc,
-  "YTD P/L:",
-  totalYtdPL
-]]);
+  const totalsRange = sheet.getRange(rowIndex, 1, 1, 8);
+  totalsRange.setValues([["TOTALS", totalValue, totalCash, "", "ALLOC:", totalAlloc, "YTD P/L:", totalYtdPL]]);
+  totalsRange.setFontWeight("bold").setFontSize(11);
+  sheet.getRange(rowIndex, 1).setBackground("#d9d9d9");
+  sheet.getRange(rowIndex, 2, 1, 8).setBackground("#d0f0c0");
+  sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat("#,##0.00");
+  sheet.getRange(rowIndex, 6).setNumberFormat("0.00%");
+  sheet.getRange(rowIndex, 8).setNumberFormat("0.00%");
 
-totalsRange.setFontWeight("bold").setFontSize(11);
-sheet.getRange(rowIndex, 1).setBackground("#d9d9d9");
-sheet.getRange(rowIndex, 2, 1, 8).setBackground("#d0f0c0");
-sheet.getRange(rowIndex, 2, 1, 2).setNumberFormat("#,##0.00");
-sheet.getRange(rowIndex, 6).setNumberFormat("0.00%");
-sheet.getRange(rowIndex, 8).setNumberFormat("0.00%");
-
-// Totals row YTD color formatting
-const totalYtdCell = sheet.getRange(rowIndex, 8);
-const rules = sheet.getConditionalFormatRules();
-
-rules.push(
-  SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberGreaterThan(0)
-    .setFontColor("#006400")
-    .setBold(true)
-    .setRanges([totalYtdCell])
-    .build()
-);
-
-rules.push(
-  SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberLessThan(0)
-    .setFontColor("red")
-    .setBold(true)
-    .setRanges([totalYtdCell])
-    .build()
-);
-
-rules.push(
-  SpreadsheetApp.newConditionalFormatRule()
-    .whenNumberEqualTo(0)
-    .setFontColor("black")
-    .setBold(true)
-    .setRanges([totalYtdCell])
-    .build()
-);
-
-sheet.setConditionalFormatRules(rules);
-
+  const totalYtdCell = sheet.getRange(rowIndex, 8);
+  const rules = sheet.getConditionalFormatRules();
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0).setFontColor("#006400").setBold(true).setRanges([totalYtdCell]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberLessThan(0).setFontColor("red").setBold(true).setRanges([totalYtdCell]).build());
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberEqualTo(0).setFontColor("black").setBold(true).setRanges([totalYtdCell]).build());
+  sheet.setConditionalFormatRules(rules);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -309,15 +260,10 @@ function getStartOfYearNetLiq_(suffix) {
 
   Object.keys(map).forEach(dateStr => {
     dateStr = String(dateStr).trim();
-
-    // Expect plain YYYY-MM-DD strings only
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
     if (!dateStr.startsWith(currentYear + "-")) return;
-
     const v = Number(map[dateStr]);
     if (!isFinite(v) || v <= 0) return;
-
-    // Lexicographic comparison works for YYYY-MM-DD
     if (!earliestDateStr || dateStr < earliestDateStr) {
       earliestDateStr = dateStr;
       earliestValue = v;
@@ -335,14 +281,11 @@ function getStartOfYearNetLiq_(suffix) {
 
 function getYtdPLPercent_(acctId, acctValue) {
   if (!acctValue) return 0;
-
   const suffix = getAccountSuffix_(acctId);
   const startValue = getStartOfYearNetLiq_(suffix);
-
   const ytd = (!startValue || startValue <= 0)
     ? 0
     : (acctValue - startValue) / startValue;
-
   console.log(
     "[YTD DEBUG] Account: " + acctId +
     " | Suffix: " + suffix +
@@ -350,6 +293,5 @@ function getYtdPLPercent_(acctId, acctValue) {
     " | CurrentValue: " + acctValue +
     " | YTD%: " + ytd
   );
-
   return ytd;
 }

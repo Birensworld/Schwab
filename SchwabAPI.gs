@@ -55,12 +55,8 @@ function getTransactions(encryptedAccountNumber, startDate, endDate) {
   // Omitting it returns all transaction types, which we filter in NetLiquidity.gs.
   const result = apiGet_(
     `${TRADER_API_BASE}/accounts/${encryptedAccountNumber}/transactions`,
-    {
-      startDate,
-      endDate,
-    }
+    { startDate, endDate }
   );
-  // API returns a direct array; guard against unexpected wrapper objects
   if (Array.isArray(result)) return result;
   if (result && Array.isArray(result.transactions)) return result.transactions;
   return [];
@@ -73,12 +69,10 @@ function getTransactions(encryptedAccountNumber, startDate, endDate) {
 function debugTransactions() {
   const props = PropertiesService.getScriptProperties();
   var hash = props.getProperty('SCHWAB_ACCT_HASH_418');
-  if (!hash) {
-    hash = getHashForSuffix_('418');
-  }
+  if (!hash) hash = getHashForSuffix_('418');
 
   var start = new Date();
-  start.setDate(start.getDate() - 7);  // last 7 days
+  start.setDate(start.getDate() - 7);
 
   console.log('Account hash (truncated): ' + hash.substring(0, 8) + '…');
   console.log('Querying transactions from ' + start.toISOString() + ' to now');
@@ -103,6 +97,27 @@ function debugTransactions() {
 // ─────────────────────────────────────────────────────────────────
 // Market Data endpoints
 // ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches real-time quote data for one or more symbols in a single API call.
+ * Returns a map of symbol → netPercentChange (as a decimal, e.g. -0.0218 = -2.18%).
+ * @param {string[]} symbols  e.g. ['AAPL', 'MSFT', 'SPY']
+ * @returns {Object}  { 'AAPL': -0.0218, 'MSFT': 0.0051, … }
+ */
+function getQuoteChangePcts_(symbols) {
+  if (!symbols || symbols.length === 0) return {};
+  const raw = apiGet_(`${MARKET_API_BASE}/quotes`, {
+    symbols:    symbols.join(','),
+    fields:     'quote',
+    indicative: false,
+  });
+  const out = {};
+  Object.keys(raw || {}).forEach(function(sym) {
+    const pct = raw[sym] && raw[sym].quote && raw[sym].quote.netPercentChange;
+    if (typeof pct === 'number') out[sym] = pct / 100;  // convert to decimal for 0.00% format
+  });
+  return out;
+}
 
 /**
  * Fetches daily OHLCV candles for a symbol between two dates.
