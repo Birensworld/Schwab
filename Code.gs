@@ -26,7 +26,7 @@ const ACCOUNT_CONFIGS = {
 };
 const ACCOUNT_ORDER = ['418', '973', '317'];
 
-const SHEET_NET_LIQ = 'Net Liquidity';
+const SHEET_NET_LIQ = 'NL History';
 const SHEET_SPY     = 'SPY History';
 const HISTORY_START = '2026-01-01';
 
