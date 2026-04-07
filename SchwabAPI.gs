@@ -1,5 +1,6 @@
 /**
  * SchwabAPI.gs — Thin wrappers around the Schwab Trader & Market Data APIs.
+ * Version: 1.1 (2026-04-07) — Add getQuoteChangePcts_() for live Chg % via /marketdata/v1/quotes.
  *
  * Trader API base:    https://api.schwabapi.com/trader/v1
  * Market Data base:   https://api.schwabapi.com/marketdata/v1
