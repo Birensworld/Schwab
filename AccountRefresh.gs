@@ -1,6 +1,6 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.4 (2026-04-06)
+ * Version: 1.5 (2026-04-08)
  *
  * Writes to the "Schwab" sheet:
  *   - One header row per account 
@@ -172,12 +172,12 @@ function UpdateSheet() {
           .whenNumberEqualTo(0).setFontColor("black").setBold(true)
           .setRanges([sheet.getRange(rowIndex, col, posRows.length, 1)]).build());
       });
-      // P/L % special: highlight deep losses
+      // P/L % special: highlight deep losses (< -7%) with light grey
       rules.push(SpreadsheetApp.newConditionalFormatRule()
-        .whenNumberLessThan(-7).setBackground("#FFCCCB").setFontColor("black").setBold(true)
+        .whenNumberLessThan(-0.07).setBackground("#d3d3d3").setFontColor("black").setBold(true)
         .setRanges([sheet.getRange(rowIndex, 7, posRows.length, 1)]).build());
       rules.push(SpreadsheetApp.newConditionalFormatRule()
-        .whenFormulaSatisfied("=AND($G" + rowIndex + "<0,$G" + rowIndex + ">-7)")
+        .whenFormulaSatisfied("=AND($G" + rowIndex + "<0,$G" + rowIndex + ">-0.07)")
         .setFontColor("red").setBold(true)
         .setRanges([sheet.getRange(rowIndex, 7, posRows.length, 1)]).build());
       sheet.setConditionalFormatRules(rules);
