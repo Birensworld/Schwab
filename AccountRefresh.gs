@@ -1,6 +1,6 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.5 (2026-04-08)
+ * Version: 1.6 (2026-04-08)
  *
  * Writes to the "Schwab" sheet:
  *   - One header row per account 
@@ -161,24 +161,25 @@ function UpdateSheet() {
 
       // Conditional formatting — Chg %, P/L, P/L %
       const rules = sheet.getConditionalFormatRules();
+
+      // P/L% (col 7): grey background for losses > 7% — must be pushed FIRST
+      // so it has higher priority than the general < 0 rule below.
+      // Google Sheets stops at the first matching rule, so order is critical.
+      const plPctRange = sheet.getRange(rowIndex, 7, posRows.length, 1);
+      rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenNumberLessThan(-0.07).setBackground("#d3d3d3").setFontColor("red").setBold(true)
+        .setRanges([plPctRange]).build());
+
+      // General green / red / zero rules for Chg %, P/L, P/L %
       [3, 6, 7].forEach(col => {
+        const r = sheet.getRange(rowIndex, col, posRows.length, 1);
         rules.push(SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberGreaterThan(0).setFontColor("green").setBold(true)
-          .setRanges([sheet.getRange(rowIndex, col, posRows.length, 1)]).build());
+          .whenNumberGreaterThan(0).setFontColor("green").setBold(true).setRanges([r]).build());
         rules.push(SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberLessThan(0).setFontColor("red").setBold(true)
-          .setRanges([sheet.getRange(rowIndex, col, posRows.length, 1)]).build());
+          .whenNumberLessThan(0).setFontColor("red").setBold(true).setRanges([r]).build());
         rules.push(SpreadsheetApp.newConditionalFormatRule()
-          .whenNumberEqualTo(0).setFontColor("black").setBold(true)
-          .setRanges([sheet.getRange(rowIndex, col, posRows.length, 1)]).build());
+          .whenNumberEqualTo(0).setFontColor("black").setBold(true).setRanges([r]).build());
       });
-      // P/L % special: highlight deep losses (< -7%) with light grey
-      rules.push(SpreadsheetApp.newConditionalFormatRule()
-        .whenNumberLessThan(-0.07).setBackground("#d3d3d3").setFontColor("black").setBold(true)
-        .setRanges([sheet.getRange(rowIndex, 7, posRows.length, 1)]).build());
-      rules.push(SpreadsheetApp.newConditionalFormatRule()
-        .whenFormulaSatisfied("=AND($G" + rowIndex + "<0,$G" + rowIndex + ">-0.07)")
-        .setFontColor("red").setBold(true)
         .setRanges([sheet.getRange(rowIndex, 7, posRows.length, 1)]).build());
       sheet.setConditionalFormatRules(rules);
 
