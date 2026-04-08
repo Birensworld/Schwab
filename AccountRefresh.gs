@@ -180,7 +180,6 @@ function UpdateSheet() {
         rules.push(SpreadsheetApp.newConditionalFormatRule()
           .whenNumberEqualTo(0).setFontColor("black").setBold(true).setRanges([r]).build());
       });
-        .setRanges([sheet.getRange(rowIndex, 7, posRows.length, 1)]).build());
       sheet.setConditionalFormatRules(rules);
 
       rowIndex += posRows.length;
