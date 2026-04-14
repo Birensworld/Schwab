@@ -1,6 +1,6 @@
 /**
  * NetLiquidity.gs — Manages the shared "Net Liquidity" sheet.
- * Version: 1.3 (2026-04-03) — Store dates as plain strings; handle legacy Date objects in comparison.
+ * Version: 1.4 (2026-04-14) — Handle Date-object rows in getNetLiqMap_(); set @-format on col A after appendRow.
  *
  * Sheet layout:
  *   Date | Net Liq 418 ($) | Net Liq 973 ($) | Source
@@ -212,8 +212,11 @@ function upsertNetLiqRow_(suffix, dateStr, value, source, skipIfExists) {
   newRow.push('');  // placeholder so appendRow creates the cell
   sheet.appendRow(newRow);
 
+  // Force date cell to plain text so Sheets won't auto-convert the string to a Date object.
+  var newRowNum = sheet.getLastRow();
+  sheet.getRange(newRowNum, 1).setNumberFormat('@').setValue(dateStr);
+
   // Set SUM formula in the Total column for the new row
-  var newRowNum  = sheet.getLastRow();
   var totalFormula = '=SUM(B' + newRowNum + ':' + lastAcctCol + newRowNum + ')';
   sheet.getRange(newRowNum, totalNetLiqCol_()).setFormula(totalFormula);
 
@@ -242,7 +245,8 @@ function getNetLiqMap_(suffix) {
   sheet.getDataRange().getValues().slice(1).forEach(function(row) {
     if (!row[0]) return;
 
-    var dateStr = String(row[0]).trim();
+    var raw = row[0];
+    var dateStr = (raw instanceof Date) ? fmtDate_(raw) : String(raw).trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
 
     var v = Number(row[col]);

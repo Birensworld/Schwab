@@ -129,7 +129,9 @@ function getQuoteChangePcts_(symbols) {
  */
 function getPriceHistory(symbol, startDate, endDate) {
   const startMs = new Date(startDate).getTime();
-  const endMs   = new Date(endDate).getTime();
+  // Use end-of-day timestamp so today's close (~20:00 UTC) is included.
+  // new Date('YYYY-MM-DD') gives midnight UTC; Schwab excludes candles after that.
+  const endMs   = new Date(endDate).getTime() + 86399999;
 
   return apiGet_(`${MARKET_API_BASE}/pricehistory`, {
     symbol,

@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 2.0 (2026-04-05) — Drop Indexed columns; actual close prices only.
+ * Version: 2.1 (2026-04-14) — Handle Date-object rows in getBenchmarkCloseMaps_(); set @-format on col A writes.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | QQQ Close ($)
@@ -149,6 +149,7 @@ function fetchSPYHistory() {
 
       const startRow = sheet.getLastRow() + 1;
       sheet.getRange(startRow, 1, newRows.length, 3).setValues(newRows);
+      sheet.getRange(startRow, 1, newRows.length, 1).setNumberFormat('@');
       sheet.getRange(startRow, 2, newRows.length, 2).setNumberFormat('"$"#,##0.00');
 
       backupSPYHistory_();
@@ -180,6 +181,7 @@ function fetchSPYHistory() {
 
       if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
       sheet.getRange(2, 1, rows.length, 3).setValues(rows);
+      sheet.getRange(2, 1, rows.length, 1).setNumberFormat('@');
       sheet.getRange(2, 2, rows.length, 2).setNumberFormat('"$"#,##0.00');
 
       backupSPYHistory_();
@@ -247,10 +249,11 @@ function getBenchmarkCloseMaps_() {
   const spy = {}, qqq = {};
   sheet.getDataRange().getValues().slice(1).forEach(function(row) {
     if (!row[0] || !row[1]) return;
-    var d = row[0];                          // already a 'yyyy-MM-dd' string
-    if (typeof d !== 'string') return;       // skip any legacy Date-object rows
-    spy[d] = parseFloat(row[1]) || 0;
-    if (row[2]) qqq[d] = parseFloat(row[2]) || 0;
+    var d = row[0];
+    var dateStr = (d instanceof Date) ? fmtDate_(d) : String(d).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    spy[dateStr] = parseFloat(row[1]) || 0;
+    if (row[2]) qqq[dateStr] = parseFloat(row[2]) || 0;
   });
 
   return { spy: spy, qqq: qqq };
