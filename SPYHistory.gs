@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 2.1 (2026-04-14) — Handle Date-object rows in getBenchmarkCloseMaps_(); set @-format on col A writes.
+ * Version: 2.2 (2026-04-14) — Fix fetchStart timezone bug (UTC noon arithmetic); set @-format BEFORE setValues.
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | QQQ Close ($)
@@ -107,11 +107,13 @@ function fetchSPYHistory() {
 
       // Base prices no longer needed (% change computed at chart-build time)
 
-      // Last date — convert to string if needed, then add 1 day
-      const lastDate = toDateStr_(allRows[allRows.length - 1][0]);
-      const lp       = lastDate.split('-');
-      fetchStart     = fmtDate_(new Date(+lp[0], +lp[1] - 1, +lp[2] + 1), tz);
-      fullRewrite    = false;
+      // Last date — convert to string if needed, then add 1 day.
+      // Use noon UTC (+12h) as anchor so the +24h shift always lands on the
+      // correct calendar date regardless of the script's timezone.
+      const lastDate  = toDateStr_(allRows[allRows.length - 1][0]);
+      const lastNoonZ = new Date(lastDate + 'T12:00:00Z');           // noon UTC on lastDate
+      fetchStart      = fmtDate_(new Date(lastNoonZ.getTime() + 86400000), tz); // +1 day
+      fullRewrite     = false;
 
       if (fetchStart > today) {
         ss.toast('SPY/QQQ history is already up to date.', 'No Update Needed', 5);
@@ -148,8 +150,9 @@ function fetchSPYHistory() {
       });
 
       const startRow = sheet.getLastRow() + 1;
-      sheet.getRange(startRow, 1, newRows.length, 3).setValues(newRows);
+      // Set @-format on col A BEFORE writing so Sheets stores dates as plain text.
       sheet.getRange(startRow, 1, newRows.length, 1).setNumberFormat('@');
+      sheet.getRange(startRow, 1, newRows.length, 3).setValues(newRows);
       sheet.getRange(startRow, 2, newRows.length, 2).setNumberFormat('"$"#,##0.00');
 
       backupSPYHistory_();
@@ -180,8 +183,9 @@ function fetchSPYHistory() {
       });
 
       if (lastRow > 1) sheet.deleteRows(2, lastRow - 1);
-      sheet.getRange(2, 1, rows.length, 3).setValues(rows);
+      // Set @-format on col A BEFORE writing so Sheets stores dates as plain text.
       sheet.getRange(2, 1, rows.length, 1).setNumberFormat('@');
+      sheet.getRange(2, 1, rows.length, 3).setValues(rows);
       sheet.getRange(2, 2, rows.length, 2).setNumberFormat('"$"#,##0.00');
 
       backupSPYHistory_();
