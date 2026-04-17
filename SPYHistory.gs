@@ -263,6 +263,59 @@ function getBenchmarkCloseMaps_() {
   return { spy: spy, qqq: qqq };
 }
 
+/**
+ * Run from the Apps Script editor (Run → debugSPYFetch) to diagnose why
+ * fetchSPYHistory is skipping today's data. Check View → Logs afterwards.
+ */
+function debugSPYFetch() {
+  var ss    = SpreadsheetApp.getActiveSpreadsheet();
+  var tz    = Session.getScriptTimeZone();
+  var today = fmtDate_(new Date(), tz);
+  console.log('Script timezone : ' + tz);
+  console.log('today           : ' + today);
+
+  var sheet   = ss.getSheetByName(SHEET_SPY);
+  var lastRow = sheet ? sheet.getLastRow() : 0;
+  console.log('Sheet lastRow   : ' + lastRow);
+  if (!sheet || lastRow <= 1) { console.log('Sheet empty — nothing to diagnose.'); return; }
+
+  var allRows  = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+  var lastCell = allRows[allRows.length - 1][0];
+  console.log('lastCell type   : ' + (lastCell instanceof Date ? 'Date' : typeof lastCell));
+  console.log('lastCell value  : ' + lastCell);
+
+  function toDateStr_(v) {
+    if (!v) return null;
+    if (typeof v === 'string') return v;
+    return fmtDate_(v, tz);
+  }
+  var lastDate = toDateStr_(lastCell);
+  console.log('lastDate        : ' + lastDate);
+
+  var lastNoonZ  = new Date(lastDate + 'T12:00:00Z');
+  var fetchStart = fmtDate_(new Date(lastNoonZ.getTime() + 86400000), tz);
+  console.log('fetchStart      : ' + fetchStart);
+  console.log('fetchStart > today? ' + (fetchStart > today));
+
+  // Count existingDates that map to today
+  var todayCount = 0;
+  allRows.forEach(function(r) { if (toDateStr_(r[0]) === today) todayCount++; });
+  console.log('Rows in sheet that map to today (' + today + '): ' + todayCount);
+
+  // Test the API call
+  try {
+    var resp = getPriceHistory('SPY', fetchStart, today);
+    var candles = (resp && Array.isArray(resp.candles)) ? resp.candles : [];
+    console.log('API candles returned: ' + candles.length);
+    candles.slice(0, 3).forEach(function(c) {
+      var d = fmtDate_(new Date(c.datetime), tz);
+      console.log('  candle datetime=' + c.datetime + '  →  ' + d + '  close=' + c.close);
+    });
+  } catch (e) {
+    console.log('API error: ' + e.message);
+  }
+}
+
 function roundTo2_(n) {
   return Math.round(n * 100) / 100;
 }
