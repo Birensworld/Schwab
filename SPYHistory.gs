@@ -1,6 +1,6 @@
 /**
  * SPYHistory.gs — Fetches and stores daily SPY and QQQ closing prices.
- * Version: 2.2 (2026-04-14) — Fix fetchStart timezone bug (UTC noon arithmetic); set @-format BEFORE setValues.
+ * Version: 2.3 (2026-04-16) — Format candle datetimes in UTC (Schwab uses midnight EDT = 04:00 UTC; CDT offset would roll back to previous calendar day).
  *
  * Sheet layout (SHEET_SPY):
  *   Date | SPY Close ($) | QQQ Close ($)
@@ -130,8 +130,11 @@ function fetchSPYHistory() {
       }
 
       const spyMap = {}, qqqMap = {};
-      spyData.forEach(function(c) { spyMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
-      qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
+      // Use UTC to interpret Schwab candle datetimes: Schwab stores daily candles
+      // at midnight Eastern (EDT = UTC-4 in summer). Formatting in CDT (UTC-5)
+      // rolls that back to 11 PM the previous day, mis-mapping the date.
+      spyData.forEach(function(c) { spyMap[fmtDate_(new Date(c.datetime), 'UTC')] = c.close; });
+      qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), 'UTC')] = c.close; });
 
       const datesToWrite = Object.keys(spyMap).sort()
         .filter(function(d) { return !existingDates[d]; });  // dedup guard
@@ -169,8 +172,8 @@ function fetchSPYHistory() {
       }
 
       const spyMap = {}, qqqMap = {};
-      spyData.forEach(function(c) { spyMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
-      qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), tz)] = c.close; });
+      spyData.forEach(function(c) { spyMap[fmtDate_(new Date(c.datetime), 'UTC')] = c.close; });
+      qqqData.forEach(function(c) { qqqMap[fmtDate_(new Date(c.datetime), 'UTC')] = c.close; });
 
       const allDates = Object.keys(spyMap).sort();
 
@@ -307,9 +310,10 @@ function debugSPYFetch() {
     var resp = getPriceHistory('SPY', fetchStart, today);
     var candles = (resp && Array.isArray(resp.candles)) ? resp.candles : [];
     console.log('API candles returned: ' + candles.length);
-    candles.slice(0, 3).forEach(function(c) {
-      var d = fmtDate_(new Date(c.datetime), tz);
-      console.log('  candle datetime=' + c.datetime + '  →  ' + d + '  close=' + c.close);
+    candles.slice(0, 5).forEach(function(c) {
+      var dTz  = fmtDate_(new Date(c.datetime), tz);
+      var dUtc = fmtDate_(new Date(c.datetime), 'UTC');
+      console.log('  datetime=' + c.datetime + '  tz=' + dTz + '  utc=' + dUtc + '  close=' + c.close);
     });
   } catch (e) {
     console.log('API error: ' + e.message);
