@@ -1,6 +1,6 @@
 /**
  * Authentication.gs — Schwab OAuth 2.0 token management (manual flow)
- * Version: 1.0 (2026-04-03)
+ * Version: 1.1 (2026-08-08) — ShowAuthUrl uses modal dialog with clickable link instead of plain-text alert
  *
  * Flow:
  *   Step 1 — ShowAuthUrl()      → opens browser to Schwab login page
@@ -43,8 +43,25 @@ function ShowAuthUrl() {
     "&client_id="    + encodeURIComponent(SW_CLIENT_ID) +
     "&redirect_uri=" + encodeURIComponent(SW_REDIRECT_URI) +
     "&scope="        + encodeURIComponent("read trade:write");
-  SpreadsheetApp.getUi().alert(
-    "Open this URL in your browser, log in, and approve access:\n\n" + url);
+
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:sans-serif;padding:20px">' +
+      '<h3 style="color:#1a73e8;margin-top:0">Step 1 — Authorize Schwab Access</h3>' +
+      '<p>Click the button below. Log in to Schwab and approve access, ' +
+      'then return here and run <b>Exchange Code for Tokens</b>.</p>' +
+      '<a href="' + url + '" target="_blank" ' +
+         'style="display:inline-block;background:#1a73e8;color:white;padding:10px 22px;' +
+                'text-decoration:none;border-radius:4px;font-size:14px">' +
+        'Open Schwab Authorization Page' +
+      '</a>' +
+      '<p style="color:#888;font-size:12px;margin-top:16px">' +
+        'After approving, the browser redirects to your redirect URI and saves the auth code ' +
+        'automatically. Then run <b>Exchange Code for Tokens</b> to complete setup.' +
+      '</p>' +
+    '</div>'
+  ).setWidth(480).setHeight(230);
+
+  SpreadsheetApp.getUi().showModalDialog(html, 'Authorize Schwab — Step 1');
 }
 
 // ─────────────────────────────────────────────────────────────────
