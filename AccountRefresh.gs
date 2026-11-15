@@ -1,11 +1,12 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.6 (2026-04-08)
+ * Version: 1.7 (2026-11-15) — Add YTD High (J/K, header row) and Drawdown (J/K, next row)
  *
  * Writes to the "Schwab" sheet:
  *   - One header row per account 
  *   - Position rows (symbol, qty, chg%, avg price, MV, P/L, P/L %, weight)
  *   - Totals row at the bottom (sum of all accounts)
+ *   - Per account, columns J:K: "YTD High:" (header row) and "Drawdown:" (row below)
  *
  * Depends on: Authentication.gs → getValidAccessToken()
  */
@@ -51,6 +52,7 @@ function UpdateSheet() {
     const acctValue = balances.liquidationValue || 0;
     const cash      = balances.cashBalance || 0;
     const ytdPL = getYtdPLPercent_(acctId, acctValue);
+    const ytdHigh = getYtdHighNetLiq_(getAccountSuffix_(acctId), acctValue);
     allAccounts.push({
       accountId:   acctId,
       label:       acctLabel,
@@ -58,6 +60,7 @@ function UpdateSheet() {
       cash:        cash,
       allocPercent: (acctValue - cash) / acctValue,
       ytdPL:       ytdPL,
+      ytdHigh:     ytdHigh,
       order:       accountOrderMap[acctLabel] || 999,
       positions:   account.positions || []
     });
@@ -110,6 +113,21 @@ function UpdateSheet() {
     rules.push(SpreadsheetApp.newConditionalFormatRule()
       .whenNumberEqualTo(0).setFontColor("black").setBold(true).setRanges([ytdCell]).build());
     sheet.setConditionalFormatRules(rules);
+
+    // YTD High (header row) + Drawdown (row below) in columns J:K
+    const drawdown = acct.ytdHigh > 0 ? (acct.value - acct.ytdHigh) / acct.ytdHigh : 0;
+    sheet.getRange(rowIndex, 10, 2, 2)
+      .setValues([["YTD High:", acct.ytdHigh || ""], ["Drawdown:", drawdown]])
+      .setFontWeight("bold")
+      .setBackground("#fff2cc");
+    sheet.getRange(rowIndex, 11).setNumberFormat("#,##0.00");
+    const ddCell = sheet.getRange(rowIndex + 1, 11).setNumberFormat("0.00%");
+    const ddRules = sheet.getConditionalFormatRules();
+    ddRules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberLessThan(0).setFontColor("red").setBold(true).setRanges([ddCell]).build());
+    ddRules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberEqualTo(0).setFontColor("#006400").setBold(true).setRanges([ddCell]).build());
+    sheet.setConditionalFormatRules(ddRules);
 
     rowIndex++;
 
@@ -277,6 +295,23 @@ function getStartOfYearNetLiq_(suffix) {
   );
 
   return earliestValue;
+}
+
+/**
+ * Highest Net Liq value for the current year from the NL History sheet.
+ * The live account value is included too, so a new high reached today
+ * (not yet captured in NL History) is reflected and drawdown never goes positive.
+ */
+function getYtdHighNetLiq_(suffix, currentValue) {
+  const map = getNetLiqMap_(suffix) || {};
+  const currentYear = String(new Date().getFullYear());
+  let high = Number(currentValue) || 0;
+  Object.keys(map).forEach(dateStr => {
+    if (!String(dateStr).startsWith(currentYear + "-")) return;
+    const v = Number(map[dateStr]);
+    if (isFinite(v) && v > high) high = v;
+  });
+  return high;
 }
 
 function getYtdPLPercent_(acctId, acctValue) {
