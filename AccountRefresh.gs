@@ -52,7 +52,7 @@ function UpdateSheet() {
     const acctValue = balances.liquidationValue || 0;
     const cash      = balances.cashBalance || 0;
     const ytdPL = getYtdPLPercent_(acctId, acctValue);
-    const ytdHigh = getYtdHighNetLiq_(getAccountSuffix_(acctId), acctValue);
+    const ytdHigh = getYtdHighNetLiq_(getAccountSuffix_(acctId));
     allAccounts.push({
       accountId:   acctId,
       label:       acctLabel,
@@ -126,7 +126,7 @@ function UpdateSheet() {
     ddRules.push(SpreadsheetApp.newConditionalFormatRule()
       .whenNumberLessThan(0).setFontColor("red").setBold(true).setRanges([ddCell]).build());
     ddRules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenNumberEqualTo(0).setFontColor("#006400").setBold(true).setRanges([ddCell]).build());
+      .whenNumberGreaterThanOrEqualTo(0).setFontColor("#006400").setBold(true).setRanges([ddCell]).build());
     sheet.setConditionalFormatRules(ddRules);
 
     rowIndex++;
@@ -298,14 +298,12 @@ function getStartOfYearNetLiq_(suffix) {
 }
 
 /**
- * Highest Net Liq value for the current year from the NL History sheet.
- * The live account value is included too, so a new high reached today
- * (not yet captured in NL History) is reflected and drawdown never goes positive.
+ * Highest Net Liq value for the current year, taken only from the NL History sheet.
  */
-function getYtdHighNetLiq_(suffix, currentValue) {
+function getYtdHighNetLiq_(suffix) {
   const map = getNetLiqMap_(suffix) || {};
   const currentYear = String(new Date().getFullYear());
-  let high = Number(currentValue) || 0;
+  let high = 0;
   Object.keys(map).forEach(dateStr => {
     if (!String(dateStr).startsWith(currentYear + "-")) return;
     const v = Number(map[dateStr]);
