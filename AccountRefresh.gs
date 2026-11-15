@@ -1,12 +1,12 @@
 /**
  * AccountRefresh.gs — Schwab portfolio refresh (balances + positions + totals)
- * Version: 1.7 (2026-11-15) — Add YTD High (J/K, header row) and Drawdown (J/K, next row)
+ * Version: 1.8 (2026-11-15) — Move YTD High / Drawdown to columns K:L
  *
  * Writes to the "Schwab" sheet:
  *   - One header row per account 
  *   - Position rows (symbol, qty, chg%, avg price, MV, P/L, P/L %, weight)
  *   - Totals row at the bottom (sum of all accounts)
- *   - Per account, columns J:K: "YTD High:" (header row) and "Drawdown:" (row below)
+ *   - Per account, columns K:L: "YTD High:" (header row) and "Drawdown:" (row below)
  *
  * Depends on: Authentication.gs → getValidAccessToken()
  */
@@ -114,14 +114,14 @@ function UpdateSheet() {
       .whenNumberEqualTo(0).setFontColor("black").setBold(true).setRanges([ytdCell]).build());
     sheet.setConditionalFormatRules(rules);
 
-    // YTD High (header row) + Drawdown (row below) in columns J:K
+    // YTD High (header row) + Drawdown (row below) in columns K:L
     const drawdown = acct.ytdHigh > 0 ? (acct.value - acct.ytdHigh) / acct.ytdHigh : 0;
-    sheet.getRange(rowIndex, 10, 2, 2)
+    sheet.getRange(rowIndex, 11, 2, 2)
       .setValues([["YTD High:", acct.ytdHigh || ""], ["Drawdown:", drawdown]])
       .setFontWeight("bold")
       .setBackground("#fff2cc");
-    sheet.getRange(rowIndex, 11).setNumberFormat("#,##0.00");
-    const ddCell = sheet.getRange(rowIndex + 1, 11).setNumberFormat("0.00%");
+    sheet.getRange(rowIndex, 12).setNumberFormat("#,##0.00");
+    const ddCell = sheet.getRange(rowIndex + 1, 12).setNumberFormat("0.00%");
     const ddRules = sheet.getConditionalFormatRules();
     ddRules.push(SpreadsheetApp.newConditionalFormatRule()
       .whenNumberLessThan(0).setFontColor("red").setBold(true).setRanges([ddCell]).build());
